@@ -1,0 +1,67 @@
+{
+  "version": 1,
+  "author": "TSP05",
+  "editor": "wokwi",
+  "parts": [
+    { "type": "board-esp32-devkit-c-v4", "id": "esp", "top": 0, "left": 0, "attrs": {} },
+
+    { "type": "wokwi-a4988", "id": "stepdrv", "top": -10, "left": 260, "attrs": {} },
+    { "type": "wokwi-stepper-motor", "id": "stepper", "top": -160, "left": 380,
+      "attrs": { "size": "17", "display": "angle", "arrow": "orange" } },
+
+    { "type": "wokwi-servo", "id": "servo", "top": 150, "left": 300, "attrs": {} },
+
+    { "type": "wokwi-potentiometer", "id": "ir_knob", "top": -150, "left": -260, "attrs": { "value": "0" } },
+    { "type": "wokwi-potentiometer", "id": "flex_knob", "top": -150, "left": -140, "attrs": { "value": "0" } },
+    { "type": "wokwi-slide-potentiometer", "id": "tof_slider", "top": 280, "left": -300,
+      "attrs": { "travelLength": "100", "value": "0" } },
+
+    { "type": "wokwi-pushbutton", "id": "mode_btn", "top": 180, "left": -200,
+      "attrs": { "color": "blue" } },
+
+    { "type": "wokwi-led", "id": "dc_ena", "top": 60, "left": -250, "attrs": { "color": "yellow" } },
+    { "type": "wokwi-led", "id": "dc_in1", "top": 60, "left": -200, "attrs": { "color": "green" } },
+    { "type": "wokwi-led", "id": "dc_in2", "top": 60, "left": -150, "attrs": { "color": "red" } }
+  ],
+  "connections": [
+    [ "esp:TX", "$serialMonitor:RX", "", [] ],
+    [ "esp:RX", "$serialMonitor:TX", "", [] ],
+
+    [ "esp:25", "stepdrv:STEP", "orange", [] ],
+    [ "esp:26", "stepdrv:DIR", "purple", [] ],
+    [ "stepdrv:RESET", "stepdrv:SLEEP", "gray", [] ],
+    [ "stepdrv:VDD", "esp:3V3", "red", [] ],
+    [ "stepdrv:GND", "esp:GND.2", "black", [] ],
+    [ "stepdrv:1A", "stepper:A+", "green", [] ],
+    [ "stepdrv:1B", "stepper:A-", "green", [] ],
+    [ "stepdrv:2A", "stepper:B+", "blue", [] ],
+    [ "stepdrv:2B", "stepper:B-", "blue", [] ],
+
+    [ "esp:13", "servo:PWM", "orange", [] ],
+    [ "servo:V+", "esp:5V", "red", [] ],
+    [ "servo:GND", "esp:GND.2", "black", [] ],
+
+    [ "ir_knob:SIG", "esp:34", "green", [] ],
+    [ "ir_knob:VCC", "esp:3V3", "red", [] ],
+    [ "ir_knob:GND", "esp:GND.1", "black", [] ],
+
+    [ "flex_knob:SIG", "esp:32", "green", [] ],
+    [ "flex_knob:VCC", "esp:3V3", "red", [] ],
+    [ "flex_knob:GND", "esp:GND.1", "black", [] ],
+
+    [ "tof_slider:SIG", "esp:35", "green", [] ],
+    [ "tof_slider:VCC", "esp:3V3", "red", [] ],
+    [ "tof_slider:GND", "esp:GND.1", "black", [] ],
+
+    [ "mode_btn:1.l", "esp:33", "blue", [] ],
+    [ "mode_btn:2.l", "esp:GND.1", "black", [] ],
+
+    [ "dc_ena:A", "esp:18", "yellow", [] ],
+    [ "dc_ena:C", "esp:GND.1", "black", [] ],
+    [ "dc_in1:A", "esp:19", "green", [] ],
+    [ "dc_in1:C", "esp:GND.1", "black", [] ],
+    [ "dc_in2:A", "esp:23", "red", [] ],
+    [ "dc_in2:C", "esp:GND.1", "black", [] ]
+  ],
+  "dependencies": {}
+}
