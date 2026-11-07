@@ -7,11 +7,14 @@ The lab guideline: *"communicate over serial with a ROS 2 node on the laptop tha
 ESP32 (firmware/tsp05_main) ──USB serial──> serial_bridge ──topics──> foxglove_bridge ──> Foxglove GUI
 ```
 
-## Build (ROS 2 Jazzy)
+## Build (ROS 2 Humble or Jazzy)
+
+Works on both, with the same code: **Humble** (Ubuntu 22.04) and **Jazzy** (Ubuntu 24.04).
+Below, replace `<distro>` with `humble` or `jazzy`. To check which one you have: `ls /opt/ros`.
 
 ```bash
 cd ros2_ws
-source /opt/ros/jazzy/setup.bash
+source /opt/ros/<distro>/setup.bash
 colcon build --symlink-install
 source install/setup.bash
 ```
@@ -23,7 +26,7 @@ source install/setup.bash
 | Real ESP32 | `ros2 launch tsp05_bridge bridge.launch.py port:=/dev/ttyUSB0` |
 | No hardware | Terminal 1: `ros2 run tsp05_bridge fake_esp32` (prints a `/dev/pts/N` path). Terminal 2: `ros2 launch tsp05_bridge bridge.launch.py port:=/dev/pts/N` |
 | Wokwi simulator (VS Code extension) | Start the simulator, then `ros2 launch tsp05_bridge bridge.launch.py port:=rfc2217://localhost:4000` |
-| With the Foxglove GUI | add `foxglove:=true` (needs `sudo apt install ros-jazzy-foxglove-bridge`) |
+| With the Foxglove GUI | add `foxglove:=true` (needs `sudo apt install ros-<distro>-foxglove-bridge`) |
 
 - **"Permission denied" on `/dev/ttyUSB0`:** `sudo usermod -aG dialout $USER`, then log out and back in.
 - **Close the Arduino/PlatformIO serial monitor first.** Only one program can hold the port.
