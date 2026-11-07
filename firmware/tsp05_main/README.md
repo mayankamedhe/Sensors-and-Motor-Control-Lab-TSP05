@@ -65,5 +65,5 @@ It uses `wokwi.toml` and `diagram.json` in this folder.
 - DC motor: open-loop PWM only. The lab needs **encoder + PID** for GUI position and velocity moves.
 - Sensors in physical units: IR is reported in mV, not cm; the flex sensor as % of range.
 - Flex calibration (`FLEX_STRAIGHT_MV`, `FLEX_BENT_MV`) is converted from Uno readings and must be **re-measured on the ESP32**.
-- ROS 2 bridge and GUI.
+- GUI: the ROS 2 bridge exists (`ros2_ws/src/tsp05_bridge`); the Foxglove panel layout does not yet.
 - The team has 3 sensors; a 5-person team needs **4**.
