@@ -9,7 +9,7 @@ All sensors and motors in one program, as the lab requires.
 | VL53L5CX swipe gesture | Stepper ±45° per swipe | `src/tof_swipe.cpp`, `src/stepper_ctrl.cpp` | Mayank's `tof_swipe`, Rai's stepper controller |
 | Pushbutton (debounced) | Toggles GUI ↔ SENSOR mode | `src/main.cpp` | |
 
-Pins: [`docs/PINOUT.md`](../../docs/PINOUT.md). Several changed from the individual sketches; check before wiring.
+Pins: [`docs/PINOUT.md`](../../docs/PINOUT.md) (matches the team wiring; the DC motor is on strapping pins, read the warning there).
 
 ## Modes
 

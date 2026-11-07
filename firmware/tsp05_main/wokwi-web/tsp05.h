@@ -19,13 +19,16 @@ constexpr int STEP = 25;
 constexpr int DIR = 26;
 // HS-311 RC servo signal (servo powered from an external 5-6 V supply)
 constexpr int SERVO = 13;
-// Analog sensors: must be ADC1 pins (GPIO32-39). ADC2 pins stop working when Wi-Fi is on.
-constexpr int IR = 34;    // Sharp IR rangefinder output
+// Analog sensors. GPIO14 is ADC2: fine while Wi-Fi is off (we only use USB serial).
+constexpr int IR = 14;    // Sharp IR rangefinder output
 constexpr int FLEX = 32;  // flex sensor divider (power the divider from 3V3, not 5V)
-// L298 H-bridge for the SPG30 DC motor
-constexpr int DC_ENA = 18;  // PWM
-constexpr int DC_IN1 = 19;
-constexpr int DC_IN2 = 23;
+// L298 H-bridge for the SPG30 DC motor.
+// WARNING: 0, 2 and 15 are ESP32 strapping pins. During reset/flashing ENA (15) and IN2 (0) float
+// HIGH and IN1 (2) LOW, so the motor can spin until setup() runs. Keep motor power off while
+// flashing. If uploads fail ("Failed to connect"), the L298 board is pulling GPIO 0 or 2 the wrong way.
+constexpr int DC_ENA = 15;  // PWM
+constexpr int DC_IN1 = 2;
+constexpr int DC_IN2 = 0;
 // Pushbutton to GND (internal pull-up), toggles GUI/SENSOR mode
 constexpr int BUTTON = 33;
 // Simulation only: slide pot that stands in for the hand in front of the ToF

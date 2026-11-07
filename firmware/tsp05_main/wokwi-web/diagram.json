@@ -41,7 +41,7 @@
     [ "servo:V+", "esp:5V", "red", [] ],
     [ "servo:GND", "esp:GND.2", "black", [] ],
 
-    [ "ir_knob:SIG", "esp:34", "green", [] ],
+    [ "ir_knob:SIG", "esp:14", "green", [] ],
     [ "ir_knob:VCC", "esp:3V3", "red", [] ],
     [ "ir_knob:GND", "esp:GND.1", "black", [] ],
 
@@ -56,11 +56,11 @@
     [ "mode_btn:1.l", "esp:33", "blue", [] ],
     [ "mode_btn:2.l", "esp:GND.1", "black", [] ],
 
-    [ "dc_ena:A", "esp:18", "yellow", [] ],
+    [ "dc_ena:A", "esp:15", "yellow", [] ],
     [ "dc_ena:C", "esp:GND.1", "black", [] ],
-    [ "dc_in1:A", "esp:19", "green", [] ],
+    [ "dc_in1:A", "esp:2", "green", [] ],
     [ "dc_in1:C", "esp:GND.1", "black", [] ],
-    [ "dc_in2:A", "esp:23", "red", [] ],
+    [ "dc_in2:A", "esp:0", "red", [] ],
     [ "dc_in2:C", "esp:GND.1", "black", [] ]
   ],
   "dependencies": {}
