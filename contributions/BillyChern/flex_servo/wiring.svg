@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1040" viewBox="0 0 1600 1040" role="img" aria-labelledby="title desc">
+<title id="title">Uno R3, flex sensor, and servo wiring</title>
+<desc id="desc">A colored connection schematic showing the Arduino-powered flex sensor voltage divider and the independently powered servo. Both share Arduino ground at breadboard row 20. The external positive connects only to the servo red wire, not the Arduino 5 volt pin.</desc>
+<defs>
+  <style>
+    .bg{fill:#f4f7fb}.header{fill:#11283f}.panel{fill:#fff;stroke:#d7e2ee;stroke-width:2}.card{fill:#f4f8fc;stroke:#c8d8e6;stroke-width:2}.uno{fill:#e4f3f6;stroke:#83b2be;stroke-width:2}.servo{fill:#f2f0fc;stroke:#bdb4e7;stroke-width:2}.supply{fill:#fff4e5;stroke:#e9c895;stroke-width:2}
+    text{font-family:Arial,Helvetica,sans-serif;fill:#142c43}.title{font-size:37px;font-weight:700;fill:#fff}.sub{font-size:18px;fill:#cddced}.section{font-size:26px;font-weight:700}.body{font-size:18px}.small{font-size:16px;fill:#425d76}.label{font-size:19px;font-weight:700}.tiny{font-size:14px;fill:#516a80}.white{fill:#fff}
+    .red{stroke:#cc3342}.orange{stroke:#ed8a1c}.yellow{stroke:#c39700}.dark{stroke:#334257}.blue{stroke:#286cb4}.green{stroke:#128361}.line{fill:none;stroke-width:6;stroke-linecap:round;stroke-linejoin:round}.node{fill:#334257;stroke:white;stroke-width:2}
+  </style>
+</defs>
+<rect class="bg" width="1600" height="1040"/>
+<rect class="header" width="1600" height="106"/>
+<text class="title" x="56" y="53" fill="#ffffff" style="fill:#ffffff">Flex sensor → Arduino Uno → HS-311 servo</text>
+<text class="sub" x="58" y="82" fill="#d5e2ef" style="fill:#d5e2ef">Signal schematic and wiring colors • component connections shown logically, not as a physical layout</text>
+<!-- SENSOR -->
+<rect class="panel" x="38" y="128" width="1524" height="386" rx="18"/>
+<text class="section" x="70" y="173">1   Bend-sensor circuit  ·  powered by the Uno</text>
+<rect class="uno" x="72" y="225" width="225" height="78" rx="12"/><text class="label" x="94" y="257">Arduino 5V</text><text class="small" x="94" y="282">red jumper</text>
+<path class="line red" d="M297 264 H380"/><circle class="node" cx="380" cy="264" r="7"/>
+<text class="small" x="337" y="234">row 11</text>
+<path class="line blue" d="M380 264 H480"/>
+<rect class="card" x="480" y="223" width="276" height="82" rx="12"/><text class="label" x="508" y="255">Flex / bend sensor</text><text class="small" x="508" y="281">Adafruit 182 · two leads</text>
+<path class="line green" d="M756 264 H900"/><circle class="node" cx="900" cy="264" r="7"/>
+<text class="small" x="857" y="234">row 10</text>
+<path class="line orange" d="M900 264 H1120"/>
+<rect class="uno" x="1120" y="225" width="235" height="78" rx="12"/><text class="label" x="1142" y="257">Arduino A0</text><text class="small" x="1142" y="282">orange jumper</text>
+<text class="tiny" x="435" y="335">Flex jumper wires are blue / green; either sensor lead can go to either row.</text>
+<path class="line dark" d="M900 264 V349"/>
+<rect class="card" x="815" y="349" width="170" height="60" rx="9"/><text class="label" text-anchor="middle" x="900" y="386">10 kΩ resistor</text>
+<path class="line dark" d="M900 409 V452 H555"/><circle class="node" cx="555" cy="452" r="7"/>
+<rect class="uno" x="72" y="413" width="225" height="78" rx="12"/><text class="label" x="94" y="445">Arduino GND</text><text class="small" x="94" y="470">yellow jumper</text>
+<path class="line yellow" d="M297 452 H555"/>
+<text class="small" x="465" y="483">row 20 · ground</text>
+<text class="small" x="1020" y="379">Row 10 joins A0,</text><text class="small" x="1020" y="405">the flex sensor,</text><text class="small" x="1020" y="431">and the resistor.</text>
+<!-- SERVO -->
+<rect class="panel" x="38" y="534" width="1524" height="364" rx="18"/>
+<text class="section" x="70" y="579">2   Servo circuit  ·  external regulated 5 V supply</text>
+<!-- Signal -->
+<rect class="uno" x="72" y="620" width="226" height="64" rx="11"/><text class="label" x="94" y="659">Arduino D9 (~9)</text>
+<path class="line yellow" d="M298 652 H1130"/>
+<rect class="servo" x="1130" y="620" width="285" height="64" rx="11"/><text class="label" x="1150" y="659">Servo YELLOW · signal</text>
+<!-- Ground -->
+<rect class="uno" x="72" y="712" width="226" height="64" rx="11"/><text class="label" x="94" y="751">Arduino GND</text>
+<path class="line yellow" d="M298 744 H545"/><circle class="node" cx="545" cy="744" r="7"/>
+<rect class="card" x="574" y="710" width="195" height="68" rx="11"/><text class="label" x="596" y="739">Row 20 GND</text><text class="tiny" x="596" y="761">same ground as above</text>
+<path class="line dark" d="M545 744 H574"/><path class="line dark" d="M769 744 H1130"/>
+<rect class="servo" x="1130" y="712" width="285" height="64" rx="11"/><text class="label" x="1150" y="751">Servo BLACK · ground</text>
+<path class="line dark" d="M545 744 V848 H575"/>
+<rect class="supply" x="575" y="818" width="313" height="58" rx="10"/><text class="label" x="593" y="855">Supply NEGATIVE (−)</text>
+<!-- Positive -->
+<rect class="supply" x="72" y="813" width="294" height="65" rx="11"/><text class="label" x="93" y="852">Supply POSITIVE (+5 V)</text>
+<path class="line red" d="M366 845 H485 V886 H1090 V845 H1130"/>
+<text class="small" x="922" y="876">isolated row 25</text>
+<rect class="servo" x="1130" y="813" width="285" height="65" rx="11"/><text class="label" x="1150" y="852">Servo RED · power</text>
+<!-- FOOTNOTES -->
+<rect x="38" y="918" width="1524" height="96" rx="14" fill="#e7eef7"/>
+<text class="body" x="66" y="950">Use the servo's ORIGINAL wire colors; extension jumpers may differ. Trace each wire through the plug.</text>
+<text class="body" x="66" y="978">Keep external +5 V separate from Uno 5V. Switch off both supplies before changing wiring; servo may move on startup.</text>
+</svg>
