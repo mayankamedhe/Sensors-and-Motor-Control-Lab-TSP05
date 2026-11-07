@@ -2,8 +2,10 @@
 //
 //   Sharp IR      -> DC motor speed  (ir_dc.cpp,       from Mayanka's IR_distance.ino)
 //   Flex sensor   -> RC servo angle  (flex_servo.cpp,  from BillyChern's flex_servo.ino)
-//   VL53L5CX swipe-> stepper +/-45 deg (tof_swipe.cpp, from Mayank's tof_swipe;
-//                                       stepper_ctrl.cpp, from Rai's stepper controller)
+//   VL53L5CX      -> stepper, two styles (`tof swipe` / `tof follow`):
+//                    swipe:  each left/right swipe turns it +/-45 deg (tof_swipe.cpp, from Mayank's tof_swipe)
+//                    follow: the stepper angle tracks the hand's left-right position
+//                    (stepper_ctrl.cpp, from Rai's stepper controller)
 //   Pushbutton    -> toggles GUI / SENSOR mode (debounced in software)
 //
 // Serial (115200): type `help`. Telemetry is printed every 100 ms as `name:value` pairs,
@@ -17,10 +19,17 @@
 namespace {
 
 constexpr float SWIPE_DEG = 45.0f;  // stepper move per swipe (CONTEXT.md open question 11)
+// Follow mode: hand at the far left of the ToF view -> -FOLLOW_SPAN_DEG/2, far right -> +FOLLOW_SPAN_DEG/2.
+constexpr float FOLLOW_SPAN_DEG = 180.0f;
+constexpr float FOLLOW_RPM = 60.0f;
+constexpr float FOLLOW_ALPHA = 0.3f;         // EMA on hand x per frame: smooths ToF jitter
+constexpr float FOLLOW_DEADBAND_DEG = 2.0f;  // ignore target changes smaller than this
 constexpr uint32_t DEBOUNCE_MS = 30;
 constexpr uint32_t TELEMETRY_MS = 100;
 
 Mode mode = Mode::GUI;  // start in GUI mode so nothing moves on its own at power-up
+enum class TofControl { SWIPE, FOLLOW };
+TofControl tofControl = TofControl::SWIPE;
 bool telemetryOn = true;
 String line;
 
@@ -56,7 +65,8 @@ void printHelp() {
   Serial.println(F("#   mode [gui|sensor]   no argument = toggle (same as the button)"));
   Serial.println(F("#   stop                stop stepper and DC motor"));
   Serial.println(F("#   status | help | tele on|off"));
-  Serial.println(F("#   swipe left|right    fake a ToF swipe (acts in SENSOR mode)"));
+  Serial.println(F("#   tof swipe|follow    ToF -> stepper style: +/-45 deg per swipe, or follow the hand"));
+  Serial.println(F("#   swipe left|right    fake a ToF swipe (acts in SENSOR mode, swipe style)"));
   Serial.println(F("# Commands (GUI mode only):"));
   Serial.println(F("#   step <deg> [rpm]    relative stepper move, e.g. step 37 or step -90 20"));
   Serial.println(F("#   move <steps> <rpm>  forward <rpm>  reverse <rpm>"));
@@ -66,9 +76,9 @@ void printHelp() {
 
 void printStatus() {
   const tof::Status t = tof::status();
-  Serial.printf("# mode=%s | stepper pos=%.3f deg (%ld steps) %s rpm=%.1f | servo=%d deg | dc_pwm=%d | "
+  Serial.printf("# mode=%s tof_control=%s | stepper pos=%.3f deg (%ld steps) %s rpm=%.1f | servo=%d deg | dc_pwm=%d | "
                 "ir=%d mV | flex=%d mV (%.1f%%) | tof=%s frames=%lu\n",
-                modeName(), stepper::positionDeg(), stepper::positionSteps(),
+                modeName(), tofControl == TofControl::FOLLOW ? "follow" : "swipe", stepper::positionDeg(), stepper::positionSteps(),
                 stepper::isMoving() ? "MOVING" : "IDLE", stepper::currentRpm(), flexservo::servoDeg(),
                 irdc::pwm(), irdc::irMv(), flexservo::rawMv(), flexservo::bendPct(), tof::stateName(t.state),
                 (unsigned long)t.frames);
@@ -97,6 +107,8 @@ void handleCommand(String cmd) {
   else if (cmd == "mode sensor") setMode(Mode::SENSOR);
   else if (cmd == "tele on") telemetryOn = true;
   else if (cmd == "tele off") telemetryOn = false;
+  else if (cmd == "tof swipe") { tofControl = TofControl::SWIPE; stepper::stop(); Serial.println(F("# TOF CONTROL swipe")); }
+  else if (cmd == "tof follow") { tofControl = TofControl::FOLLOW; stepper::stop(); Serial.println(F("# TOF CONTROL follow")); }
   else if (sscanf(c, "swipe %15s", word) == 1) tof::injectSwipe(strcmp(word, "right") == 0 ? 1 : -1);
   else if (sscanf(c, "step %f %f", &a, &b) == 2) {
     if (guiOnly()) Serial.printf("# STEP requested %.3f deg -> actual %.3f deg\n", a, stepper::moveDegrees(a, b));
@@ -128,7 +140,37 @@ void readSerial() {
 }
 
 // ---------------- Sensor -> stepper ----------------
+// Follow style: once per new ToF frame, point the stepper at the (smoothed) hand x.
+// When the hand leaves, the stepper holds its last position.
+void handleFollow() {
+  static uint32_t lastFrame = 0;
+  static bool tracking = false;
+  static float xSmooth = 0, lastTarget = 0;
+  while (tof::pollSwipe() != 0) {}  // swipes are not used in this style
+
+  const tof::Status t = tof::status();
+  if (t.frames == lastFrame) return;
+  lastFrame = t.frames;
+  if (mode != Mode::SENSOR || !t.handPresent) {
+    tracking = false;
+    return;
+  }
+  if (!tracking) {  // hand just appeared: start the filter at its position
+    tracking = true;
+    xSmooth = t.handX;
+    lastTarget = stepper::positionDeg();
+  }
+  xSmooth += FOLLOW_ALPHA * (t.handX - xSmooth);
+  const float target = (xSmooth / (tof::COLUMNS - 1) - 0.5f) * FOLLOW_SPAN_DEG;
+  if (fabsf(target - lastTarget) < FOLLOW_DEADBAND_DEG) return;
+  lastTarget = stepper::moveToDegrees(target, FOLLOW_RPM);
+}
+
 void handleSwipes() {
+  if (tofControl == TofControl::FOLLOW) {
+    handleFollow();
+    return;
+  }
   const int dir = tof::pollSwipe();
   if (dir == 0) return;
   if (mode != Mode::SENSOR) {
@@ -157,9 +199,9 @@ void printTelemetry() {
                   t.state == tof::State::CALIBRATING ? " (keep your hand away from the sensor)" : "");
   }
   if (!telemetryOn) return;
-  Serial.printf("sensor_mode:%d ir_mv:%d dc_pwm:%d flex_raw_mv:%d flex_filt_mv:%.0f bend_pct:%.1f "
+  Serial.printf("sensor_mode:%d tof_follow:%d ir_mv:%d dc_pwm:%d flex_raw_mv:%d flex_filt_mv:%.0f bend_pct:%.1f "
                 "servo_deg:%d hand:%d hand_x:%.2f hand_mm:%d step_deg:%.3f\n",
-                mode == Mode::SENSOR, irdc::irMv(), irdc::pwm(), flexservo::rawMv(), flexservo::filteredMv(),
+                mode == Mode::SENSOR, tofControl == TofControl::FOLLOW, irdc::irMv(), irdc::pwm(), flexservo::rawMv(), flexservo::filteredMv(),
                 flexservo::bendPct(), flexservo::servoDeg(), t.handPresent, t.handX, t.nearestMm,
                 stepper::positionDeg());
 }

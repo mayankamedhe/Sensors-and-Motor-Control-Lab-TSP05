@@ -60,6 +60,8 @@ void update();
 // Relative move. Rounds to the nearest whole step and returns the actual angle that will be moved.
 float moveDegrees(float deg, float rpm = DEFAULT_RPM);
 void moveSteps(long steps, float rpm = DEFAULT_RPM);
+// Absolute move to an angle (0 = position at boot). Retargets smoothly if already moving.
+float moveToDegrees(float deg, float rpm = DEFAULT_RPM);
 void runContinuous(bool forward, float rpm);
 void stop();
 
@@ -78,6 +80,8 @@ float currentRpm();
 #include <Arduino.h>
 
 namespace tof {
+
+constexpr int COLUMNS = 4;  // 4x4 zone mode: hand x is reported in 0..COLUMNS-1
 
 enum class State { INIT, CALIBRATING, READY, ERROR };
 
@@ -204,6 +208,20 @@ float moveDegrees(float deg, float rpm) {
   return steps * DEG_PER_STEP;
 }
 
+float moveToDegrees(float deg, float rpm) {
+  const long target = lroundf(deg / DEG_PER_STEP);
+  const long steps = target - position;
+  if (steps == 0) {
+    if (!continuous) stop();
+  } else if (running && !continuous && (steps > 0) == (dirSign > 0)) {
+    stepsRemaining = labs(steps);  // same direction: just change how far to go, keep the step timing
+    setSpeed(rpm);
+  } else {
+    moveSteps(steps, rpm);
+  }
+  return target * DEG_PER_STEP;
+}
+
 void runContinuous(bool forward, float rpm) {
   setDirection(forward ? 1 : -1);
   delayMicroseconds(5);
@@ -243,7 +261,7 @@ namespace {
 
 // ---------------- Tunables (from Mayank's tested bringup/tof_swipe) ----------------
 constexpr uint32_t I2C_HZ = 400000;
-constexpr int W = 4;               // 4x4 zones: enough for left/right, allows a high frame rate
+constexpr int W = COLUMNS;         // 4x4 zones: enough for left/right, allows a high frame rate
 constexpr int RANGING_HZ = 30;
 constexpr int HAND_MIN_MM = 30;
 constexpr int HAND_MAX_MM = 400;   // hand must be closer than this
@@ -298,7 +316,9 @@ bool readFrame() {
   return true;
 }
 #else
-// Slider at either end = no hand. Dragging it across = a hand moving across the columns.
+// Slider at either end (outer 3%) = no hand. In between, the slider position is the hand's x.
+// A hand between two columns is drawn in both, at distances chosen so the 1/distance-weighted
+// mean column comes out at the exact slider position, so the real tracking code sees smooth motion.
 bool sensorBegin() {
   pinMode(pins::SIM_TOF_SLIDER, INPUT);
   return true;
@@ -314,9 +334,21 @@ bool readFrame() {
     distMm[i] = 1200;  // background wall
     zoneStatus[i] = 5;
   }
-  if (u > 0.05f && u < 0.95f) {
-    const int col = (int)lroundf((u - 0.05f) / 0.90f * (W - 1));
-    for (int row = 0; row < W; row++) distMm[row * W + col] = 150;
+  constexpr float EDGE = 0.03f;
+  if (u > EDGE && u < 1.0f - EDGE) {
+    const float x = (u - EDGE) / (1.0f - 2 * EDGE) * (W - 1);  // 0..W-1
+    const int c0 = min((int)floorf(x), W - 1);
+    const float f = x - c0;
+    for (int row = 0; row < W; row++) {
+      if (c0 == W - 1 || f < 0.1f) {
+        distMm[row * W + c0] = 150;
+      } else if (f > 0.9f) {
+        distMm[row * W + c0 + 1] = 150;
+      } else {  // weights 1/d0 and 1/d1 give mean column c0 + d0 / (d0 + d1) = c0 + f
+        distMm[row * W + c0] = (int16_t)(300 * f);
+        distMm[row * W + c0 + 1] = (int16_t)(300 * (1 - f));
+      }
+    }
   }
   return true;
 }
@@ -593,8 +625,10 @@ int pwm() { return pwmSigned; }
 //
 //   Sharp IR      -> DC motor speed  (ir_dc.cpp,       from Mayanka's IR_distance.ino)
 //   Flex sensor   -> RC servo angle  (flex_servo.cpp,  from BillyChern's flex_servo.ino)
-//   VL53L5CX swipe-> stepper +/-45 deg (tof_swipe.cpp, from Mayank's tof_swipe;
-//                                       stepper_ctrl.cpp, from Rai's stepper controller)
+//   VL53L5CX      -> stepper, two styles (`tof swipe` / `tof follow`):
+//                    swipe:  each left/right swipe turns it +/-45 deg (tof_swipe.cpp, from Mayank's tof_swipe)
+//                    follow: the stepper angle tracks the hand's left-right position
+//                    (stepper_ctrl.cpp, from Rai's stepper controller)
 //   Pushbutton    -> toggles GUI / SENSOR mode (debounced in software)
 //
 // Serial (115200): type `help`. Telemetry is printed every 100 ms as `name:value` pairs,
@@ -603,10 +637,17 @@ int pwm() { return pwmSigned; }
 namespace {
 
 constexpr float SWIPE_DEG = 45.0f;  // stepper move per swipe (CONTEXT.md open question 11)
+// Follow mode: hand at the far left of the ToF view -> -FOLLOW_SPAN_DEG/2, far right -> +FOLLOW_SPAN_DEG/2.
+constexpr float FOLLOW_SPAN_DEG = 180.0f;
+constexpr float FOLLOW_RPM = 60.0f;
+constexpr float FOLLOW_ALPHA = 0.3f;         // EMA on hand x per frame: smooths ToF jitter
+constexpr float FOLLOW_DEADBAND_DEG = 2.0f;  // ignore target changes smaller than this
 constexpr uint32_t DEBOUNCE_MS = 30;
 constexpr uint32_t TELEMETRY_MS = 100;
 
 Mode mode = Mode::GUI;  // start in GUI mode so nothing moves on its own at power-up
+enum class TofControl { SWIPE, FOLLOW };
+TofControl tofControl = TofControl::SWIPE;
 bool telemetryOn = true;
 String line;
 
@@ -642,7 +683,8 @@ void printHelp() {
   Serial.println(F("#   mode [gui|sensor]   no argument = toggle (same as the button)"));
   Serial.println(F("#   stop                stop stepper and DC motor"));
   Serial.println(F("#   status | help | tele on|off"));
-  Serial.println(F("#   swipe left|right    fake a ToF swipe (acts in SENSOR mode)"));
+  Serial.println(F("#   tof swipe|follow    ToF -> stepper style: +/-45 deg per swipe, or follow the hand"));
+  Serial.println(F("#   swipe left|right    fake a ToF swipe (acts in SENSOR mode, swipe style)"));
   Serial.println(F("# Commands (GUI mode only):"));
   Serial.println(F("#   step <deg> [rpm]    relative stepper move, e.g. step 37 or step -90 20"));
   Serial.println(F("#   move <steps> <rpm>  forward <rpm>  reverse <rpm>"));
@@ -652,9 +694,9 @@ void printHelp() {
 
 void printStatus() {
   const tof::Status t = tof::status();
-  Serial.printf("# mode=%s | stepper pos=%.3f deg (%ld steps) %s rpm=%.1f | servo=%d deg | dc_pwm=%d | "
+  Serial.printf("# mode=%s tof_control=%s | stepper pos=%.3f deg (%ld steps) %s rpm=%.1f | servo=%d deg | dc_pwm=%d | "
                 "ir=%d mV | flex=%d mV (%.1f%%) | tof=%s frames=%lu\n",
-                modeName(), stepper::positionDeg(), stepper::positionSteps(),
+                modeName(), tofControl == TofControl::FOLLOW ? "follow" : "swipe", stepper::positionDeg(), stepper::positionSteps(),
                 stepper::isMoving() ? "MOVING" : "IDLE", stepper::currentRpm(), flexservo::servoDeg(),
                 irdc::pwm(), irdc::irMv(), flexservo::rawMv(), flexservo::bendPct(), tof::stateName(t.state),
                 (unsigned long)t.frames);
@@ -683,6 +725,8 @@ void handleCommand(String cmd) {
   else if (cmd == "mode sensor") setMode(Mode::SENSOR);
   else if (cmd == "tele on") telemetryOn = true;
   else if (cmd == "tele off") telemetryOn = false;
+  else if (cmd == "tof swipe") { tofControl = TofControl::SWIPE; stepper::stop(); Serial.println(F("# TOF CONTROL swipe")); }
+  else if (cmd == "tof follow") { tofControl = TofControl::FOLLOW; stepper::stop(); Serial.println(F("# TOF CONTROL follow")); }
   else if (sscanf(c, "swipe %15s", word) == 1) tof::injectSwipe(strcmp(word, "right") == 0 ? 1 : -1);
   else if (sscanf(c, "step %f %f", &a, &b) == 2) {
     if (guiOnly()) Serial.printf("# STEP requested %.3f deg -> actual %.3f deg\n", a, stepper::moveDegrees(a, b));
@@ -714,7 +758,37 @@ void readSerial() {
 }
 
 // ---------------- Sensor -> stepper ----------------
+// Follow style: once per new ToF frame, point the stepper at the (smoothed) hand x.
+// When the hand leaves, the stepper holds its last position.
+void handleFollow() {
+  static uint32_t lastFrame = 0;
+  static bool tracking = false;
+  static float xSmooth = 0, lastTarget = 0;
+  while (tof::pollSwipe() != 0) {}  // swipes are not used in this style
+
+  const tof::Status t = tof::status();
+  if (t.frames == lastFrame) return;
+  lastFrame = t.frames;
+  if (mode != Mode::SENSOR || !t.handPresent) {
+    tracking = false;
+    return;
+  }
+  if (!tracking) {  // hand just appeared: start the filter at its position
+    tracking = true;
+    xSmooth = t.handX;
+    lastTarget = stepper::positionDeg();
+  }
+  xSmooth += FOLLOW_ALPHA * (t.handX - xSmooth);
+  const float target = (xSmooth / (tof::COLUMNS - 1) - 0.5f) * FOLLOW_SPAN_DEG;
+  if (fabsf(target - lastTarget) < FOLLOW_DEADBAND_DEG) return;
+  lastTarget = stepper::moveToDegrees(target, FOLLOW_RPM);
+}
+
 void handleSwipes() {
+  if (tofControl == TofControl::FOLLOW) {
+    handleFollow();
+    return;
+  }
   const int dir = tof::pollSwipe();
   if (dir == 0) return;
   if (mode != Mode::SENSOR) {
@@ -743,9 +817,9 @@ void printTelemetry() {
                   t.state == tof::State::CALIBRATING ? " (keep your hand away from the sensor)" : "");
   }
   if (!telemetryOn) return;
-  Serial.printf("sensor_mode:%d ir_mv:%d dc_pwm:%d flex_raw_mv:%d flex_filt_mv:%.0f bend_pct:%.1f "
+  Serial.printf("sensor_mode:%d tof_follow:%d ir_mv:%d dc_pwm:%d flex_raw_mv:%d flex_filt_mv:%.0f bend_pct:%.1f "
                 "servo_deg:%d hand:%d hand_x:%.2f hand_mm:%d step_deg:%.3f\n",
-                mode == Mode::SENSOR, irdc::irMv(), irdc::pwm(), flexservo::rawMv(), flexservo::filteredMv(),
+                mode == Mode::SENSOR, tofControl == TofControl::FOLLOW, irdc::irMv(), irdc::pwm(), flexservo::rawMv(), flexservo::filteredMv(),
                 flexservo::bendPct(), flexservo::servoDeg(), t.handPresent, t.handX, t.nearestMm,
                 stepper::positionDeg());
 }

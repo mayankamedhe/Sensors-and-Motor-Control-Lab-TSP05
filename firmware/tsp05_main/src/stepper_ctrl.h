@@ -16,6 +16,8 @@ void update();
 // Relative move. Rounds to the nearest whole step and returns the actual angle that will be moved.
 float moveDegrees(float deg, float rpm = DEFAULT_RPM);
 void moveSteps(long steps, float rpm = DEFAULT_RPM);
+// Absolute move to an angle (0 = position at boot). Retargets smoothly if already moving.
+float moveToDegrees(float deg, float rpm = DEFAULT_RPM);
 void runContinuous(bool forward, float rpm);
 void stop();
 

@@ -68,6 +68,20 @@ float moveDegrees(float deg, float rpm) {
   return steps * DEG_PER_STEP;
 }
 
+float moveToDegrees(float deg, float rpm) {
+  const long target = lroundf(deg / DEG_PER_STEP);
+  const long steps = target - position;
+  if (steps == 0) {
+    if (!continuous) stop();
+  } else if (running && !continuous && (steps > 0) == (dirSign > 0)) {
+    stepsRemaining = labs(steps);  // same direction: just change how far to go, keep the step timing
+    setSpeed(rpm);
+  } else {
+    moveSteps(steps, rpm);
+  }
+  return target * DEG_PER_STEP;
+}
+
 void runContinuous(bool forward, float rpm) {
   setDirection(forward ? 1 : -1);
   delayMicroseconds(5);

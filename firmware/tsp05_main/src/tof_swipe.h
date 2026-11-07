@@ -6,6 +6,8 @@
 
 namespace tof {
 
+constexpr int COLUMNS = 4;  // 4x4 zone mode: hand x is reported in 0..COLUMNS-1
+
 enum class State { INIT, CALIBRATING, READY, ERROR };
 
 struct Status {

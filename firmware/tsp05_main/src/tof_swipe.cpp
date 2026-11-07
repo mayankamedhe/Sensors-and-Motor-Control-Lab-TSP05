@@ -15,7 +15,7 @@ namespace {
 
 // ---------------- Tunables (from Mayank's tested bringup/tof_swipe) ----------------
 constexpr uint32_t I2C_HZ = 400000;
-constexpr int W = 4;               // 4x4 zones: enough for left/right, allows a high frame rate
+constexpr int W = COLUMNS;         // 4x4 zones: enough for left/right, allows a high frame rate
 constexpr int RANGING_HZ = 30;
 constexpr int HAND_MIN_MM = 30;
 constexpr int HAND_MAX_MM = 400;   // hand must be closer than this
@@ -70,7 +70,9 @@ bool readFrame() {
   return true;
 }
 #else
-// Slider at either end = no hand. Dragging it across = a hand moving across the columns.
+// Slider at either end (outer 3%) = no hand. In between, the slider position is the hand's x.
+// A hand between two columns is drawn in both, at distances chosen so the 1/distance-weighted
+// mean column comes out at the exact slider position, so the real tracking code sees smooth motion.
 bool sensorBegin() {
   pinMode(pins::SIM_TOF_SLIDER, INPUT);
   return true;
@@ -86,9 +88,21 @@ bool readFrame() {
     distMm[i] = 1200;  // background wall
     zoneStatus[i] = 5;
   }
-  if (u > 0.05f && u < 0.95f) {
-    const int col = (int)lroundf((u - 0.05f) / 0.90f * (W - 1));
-    for (int row = 0; row < W; row++) distMm[row * W + col] = 150;
+  constexpr float EDGE = 0.03f;
+  if (u > EDGE && u < 1.0f - EDGE) {
+    const float x = (u - EDGE) / (1.0f - 2 * EDGE) * (W - 1);  // 0..W-1
+    const int c0 = min((int)floorf(x), W - 1);
+    const float f = x - c0;
+    for (int row = 0; row < W; row++) {
+      if (c0 == W - 1 || f < 0.1f) {
+        distMm[row * W + c0] = 150;
+      } else if (f > 0.9f) {
+        distMm[row * W + c0 + 1] = 150;
+      } else {  // weights 1/d0 and 1/d1 give mean column c0 + d0 / (d0 + d1) = c0 + f
+        distMm[row * W + c0] = (int16_t)(300 * f);
+        distMm[row * W + c0 + 1] = (int16_t)(300 * (1 - f));
+      }
+    }
   }
   return true;
 }

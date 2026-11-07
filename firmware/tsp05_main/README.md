@@ -6,7 +6,7 @@ All sensors and motors in one program, as the lab requires.
 |---|---|---|---|
 | Sharp IR rangefinder | DC motor speed (L298) | `src/ir_dc.cpp` | Mayanka's `IR_distance.ino` |
 | Flex sensor | RC servo angle | `src/flex_servo.cpp` | BillyChern's `flex_servo.ino` |
-| VL53L5CX swipe gesture | Stepper ±45° per swipe | `src/tof_swipe.cpp`, `src/stepper_ctrl.cpp` | Mayank's `tof_swipe`, Rai's stepper controller |
+| VL53L5CX hand position | Stepper: ±45° per swipe (`tof swipe`, default) or follows the hand (`tof follow`) | `src/tof_swipe.cpp`, `src/stepper_ctrl.cpp` | Mayank's `tof_swipe`, Rai's stepper controller |
 | Pushbutton (debounced) | Toggles GUI ↔ SENSOR mode | `src/main.cpp` | |
 
 Pins: [`docs/PINOUT.md`](../../docs/PINOUT.md) (matches the team wiring; the DC motor is on strapping pins, read the warning there).
@@ -20,7 +20,7 @@ Pins: [`docs/PINOUT.md`](../../docs/PINOUT.md) (matches the team wiring; the DC 
 ## Serial interface (115200 baud)
 
 Type `help`. Main commands: `mode [gui|sensor]`, `step <deg> [rpm]` (prints requested vs. actual angle),
-`servo <deg>`, `dc <-255..255>`, `stop`, `status`, `tele on|off`, `swipe left|right` (fake swipe for testing).
+`servo <deg>`, `dc <-255..255>`, `stop`, `status`, `tele on|off`, `tof swipe|follow`, `swipe left|right` (fake swipe for testing).
 
 Every 100 ms the firmware prints `name:value` telemetry (`ir_mv`, `dc_pwm`, `flex_raw_mv`, `flex_filt_mv`, `servo_deg`,
 `hand_x`, `step_deg`, …). The Arduino IDE **Serial Plotter** graphs it directly, including flex raw vs. filtered.
@@ -42,11 +42,12 @@ Wokwi has no VL53L5CX, DC motor or EasyDriver, so the simulation substitutes:
 
 | Real part | In the simulator |
 |---|---|
-| VL53L5CX hand | **Slide pot** (bottom left). Drag it from one end to the other in under 1.5 s = one swipe |
+| VL53L5CX hand | **Slide pot** (bottom). The outer 3% at each end = no hand; anywhere else = hand at that left-right position. *Swipe style:* drag end to end in under 1.5 s. *Follow style:* the stepper tracks the slider |
 | Sharp IR | Left **knob** |
 | Flex sensor | Right **knob** |
 | EasyDriver | A4988 driver (full-step mode, so 1.8°/step instead of 0.225°) |
-| DC motor | 3 LEDs: yellow = ENA (brightness = speed), green = IN1, red = IN2 |
+| DC motor | 3 LEDs: yellow = ENA (brightness = speed), green = IN1 (forward), red = IN2 (reverse) |
+| Mode button | Blue pushbutton: toggles GUI ↔ SENSOR mode |
 
 Steps:
 1. Regenerate the paste-ready files if `src/` changed: `python3 tools/make_wokwi_web.py`.
