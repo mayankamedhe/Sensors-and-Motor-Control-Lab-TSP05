@@ -57,7 +57,7 @@ External regulated +5 V ──────────────────�
 - On our bench, the sensor read approximately **477 straight** and **521 at a comfortable bend**. These are device- and setup-specific ADC counts, not universal values.
 - The program filters the ADC reading, normalizes it between the two observed endpoints, and sends a **70–150° servo command**. The Serial Monitor prints `raw`, `filtered`, `bend_pct`, and `servo_cmd_deg`.
 - `bend_pct` is a clipped percentage of the demonstrated range, not a measured physical angle. `servo_cmd_deg` is the **command**, not independent measurement of the shaft's actual position.
-- The user confirmed servo movement with the external supply. Further measurements are needed to convert sensor data to physical bend angle, establish error over the usable range, and produce the required measured transfer plot and raw/filtered comparison.
+- The servo moved in response to the flex sensor using the external supply. Further measurements are needed to convert sensor data to physical bend angle, establish error over the usable range, and produce the required measured transfer plot and raw/filtered comparison.
 - The team's complete system still needs the other sensors, motors, GUI/ROS 2 interface, and one unified Uno program. During integration, replace the standalone `delay(20)` with nonblocking timing if required. On Uno R3, using the Servo library disables `analogWrite()` PWM on pins 9 and 10; coordinate the DC motor's PWM pin.
 
 ## Individual contribution and challenges
