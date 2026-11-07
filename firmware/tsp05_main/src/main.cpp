@@ -199,11 +199,13 @@ void printTelemetry() {
                   t.state == tof::State::CALIBRATING ? " (keep your hand away from the sensor)" : "");
   }
   if (!telemetryOn) return;
-  Serial.printf("sensor_mode:%d tof_follow:%d ir_mv:%d dc_pwm:%d flex_raw_mv:%d flex_filt_mv:%.0f bend_pct:%.1f "
-                "servo_deg:%d hand:%d hand_x:%.2f hand_mm:%d step_deg:%.3f\n",
-                mode == Mode::SENSOR, tofControl == TofControl::FOLLOW, irdc::irMv(), irdc::pwm(), flexservo::rawMv(), flexservo::filteredMv(),
-                flexservo::bendPct(), flexservo::servoDeg(), t.handPresent, t.handX, t.nearestMm,
-                stepper::positionDeg());
+  // Telemetry contract (parsed by ros2_ws/src/tsp05_bridge/tsp05_bridge/protocol.py):
+  // one line of space-separated `key:number` pairs. Add keys freely; don't rename existing ones.
+  Serial.printf("sensor_mode:%d tof_follow:%d tof_state:%d ir_mv:%d dc_pwm:%d flex_raw_mv:%d flex_filt_mv:%.0f "
+                "bend_pct:%.1f servo_deg:%d hand:%d hand_x:%.2f hand_mm:%d step_deg:%.3f step_moving:%d\n",
+                mode == Mode::SENSOR, tofControl == TofControl::FOLLOW, (int)t.state, irdc::irMv(), irdc::pwm(),
+                flexservo::rawMv(), flexservo::filteredMv(), flexservo::bendPct(), flexservo::servoDeg(),
+                t.handPresent, t.handX, t.nearestMm, stepper::positionDeg(), stepper::isMoving());
 }
 
 }  // namespace

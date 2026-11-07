@@ -24,7 +24,7 @@ Type `help`. Main commands: `mode [gui|sensor]`, `step <deg> [rpm]` (prints requ
 
 Every 100 ms the firmware prints `name:value` telemetry (`ir_mv`, `dc_pwm`, `flex_raw_mv`, `flex_filt_mv`, `servo_deg`,
 `hand_x`, `step_deg`, …). The Arduino IDE **Serial Plotter** graphs it directly, including flex raw vs. filtered.
-Event lines start with `#`. A future ROS 2 bridge can parse the same lines.
+Event lines start with `#`. The ROS 2 bridge (`ros2_ws/src/tsp05_bridge`) parses these lines into topics.
 
 ## Build and flash real hardware
 

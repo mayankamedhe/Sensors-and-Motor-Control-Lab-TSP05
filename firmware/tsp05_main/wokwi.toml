@@ -2,3 +2,5 @@
 version = 1
 firmware = '.pio/build/wokwi/firmware.bin'
 elf = '.pio/build/wokwi/firmware.elf'
+# Expose the simulated serial port so the ROS 2 bridge can connect: port:=rfc2217://localhost:4000
+rfc2217ServerPort = 4000
