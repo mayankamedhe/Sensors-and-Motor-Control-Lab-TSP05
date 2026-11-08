@@ -30,8 +30,8 @@ Mode mode = Mode::GUI;  // start in GUI mode so nothing moves on its own at powe
 enum class TofControl { SWIPE, FOLLOW };
 TofControl tofControl = TofControl::SWIPE;
 // Stepper speed when the ToF drives it (swipe and follow). Change at runtime with `speed <rpm>`.
-// There is no acceleration ramp: if the motor buzzes or skips instead of turning, lower it.
-float sensorRpm = 60.0f;
+// Moves ramp up from stepper::START_RPM. If the motor buzzes or skips instead of turning, lower it.
+float sensorRpm = 180.0f;
 bool telemetryOn = true;
 String line;
 

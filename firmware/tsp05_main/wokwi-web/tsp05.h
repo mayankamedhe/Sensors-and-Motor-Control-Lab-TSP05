@@ -51,8 +51,13 @@ namespace stepper {
 
 constexpr long STEPS_PER_REV = 200L * MICROSTEP;
 constexpr float DEG_PER_STEP = 360.0f / STEPS_PER_REV;
-constexpr float DEFAULT_RPM = 30.0f;
-constexpr float MAX_RPM = 120.0f;  // no acceleration ramp, so keep speeds moderate
+constexpr float DEFAULT_RPM = 180.0f;
+constexpr float MAX_RPM = 300.0f;
+// Moves start and end at START_RPM and ramp up/down at ACCEL_RPM_PER_S (0 -> 180 rpm in ~20 ms).
+// Starting a stepper directly at high speed makes it stall and buzz; the ramp avoids that.
+// If it still stalls: lower ACCEL_RPM_PER_S or the speed, or raise the EasyDriver current a little.
+constexpr float START_RPM = 60.0f;
+constexpr float ACCEL_RPM_PER_S = 6000.0f;
 
 void begin();
 void update();
@@ -153,13 +158,37 @@ float rpmNow = DEFAULT_RPM;
 uint32_t intervalUs = 0;
 uint32_t lastStepUs = 0;
 
+// Speeds in STEP pulses per second, acceleration in pulses/s^2.
+float vTarget = 0;  // cruise speed
+float vStart = 0;   // start/stop speed
+float v = 0;        // current speed
+const float ACCEL_SPS2 = ACCEL_RPM_PER_S * STEPS_PER_REV / 60.0f;
+
+float rpmToSps(float rpm) { return rpm * STEPS_PER_REV / 60.0f; }  // pulses/s = RPM x steps/rev / 60
+
 void setSpeed(float rpm) {
-  rpm = fabsf(rpm);
-  rpm = constrain(rpm, 0.1f, MAX_RPM);
-  rpmNow = rpm;
-  // STEP pulses per second = RPM x steps/rev / 60
-  const float stepsPerSecond = rpmNow * STEPS_PER_REV / 60.0f;
-  intervalUs = (uint32_t)(1000000.0f / stepsPerSecond);
+  rpmNow = constrain(fabsf(rpm), 0.1f, MAX_RPM);
+  vTarget = rpmToSps(rpmNow);
+}
+
+void startProfile() {  // begin a move from standstill
+  vStart = min(rpmToSps(START_RPM), vTarget);
+  v = vStart;
+  intervalUs = (uint32_t)(1000000.0f / v);
+}
+
+// After each step: v^2 = v0^2 +/- 2*a*(1 step). Decelerate when the remaining steps are
+// just enough to slow down to vStart, otherwise accelerate (or slow) towards vTarget.
+void updateSpeed() {
+  const float stopSteps = (v * v - vStart * vStart) / (2.0f * ACCEL_SPS2);
+  if (!continuous && stepsRemaining <= stopSteps) {
+    v = sqrtf(max(v * v - 2.0f * ACCEL_SPS2, vStart * vStart));
+  } else if (v < vTarget) {
+    v = min(vTarget, sqrtf(v * v + 2.0f * ACCEL_SPS2));
+  } else if (v > vTarget) {
+    v = max(vTarget, sqrtf(max(v * v - 2.0f * ACCEL_SPS2, 0.0f)));
+  }
+  intervalUs = (uint32_t)(1000000.0f / v);
 }
 
 void setDirection(int sign) {
@@ -188,7 +217,11 @@ void update() {
   digitalWrite(pins::STEP, LOW);
   position += dirSign;
 
-  if (!continuous && --stepsRemaining <= 0) running = false;
+  if (!continuous && --stepsRemaining <= 0) {
+    running = false;
+    return;
+  }
+  updateSpeed();
 }
 
 void moveSteps(long steps, float rpm) {
@@ -196,6 +229,7 @@ void moveSteps(long steps, float rpm) {
   setDirection(steps > 0 ? 1 : -1);
   delayMicroseconds(5);  // DIR setup time before the first STEP edge
   setSpeed(rpm);
+  startProfile();
   stepsRemaining = labs(steps);
   continuous = false;
   running = true;
@@ -226,6 +260,7 @@ void runContinuous(bool forward, float rpm) {
   setDirection(forward ? 1 : -1);
   delayMicroseconds(5);
   setSpeed(rpm);
+  startProfile();
   continuous = true;
   running = true;
   lastStepUs = micros();
@@ -648,8 +683,8 @@ Mode mode = Mode::GUI;  // start in GUI mode so nothing moves on its own at powe
 enum class TofControl { SWIPE, FOLLOW };
 TofControl tofControl = TofControl::SWIPE;
 // Stepper speed when the ToF drives it (swipe and follow). Change at runtime with `speed <rpm>`.
-// There is no acceleration ramp: if the motor buzzes or skips instead of turning, lower it.
-float sensorRpm = 60.0f;
+// Moves ramp up from stepper::START_RPM. If the motor buzzes or skips instead of turning, lower it.
+float sensorRpm = 180.0f;
 bool telemetryOn = true;
 String line;
 

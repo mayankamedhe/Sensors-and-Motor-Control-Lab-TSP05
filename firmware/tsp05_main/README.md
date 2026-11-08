@@ -20,7 +20,7 @@ Pins: [`docs/PINOUT.md`](../../docs/PINOUT.md) (matches the team wiring; the DC 
 ## Serial interface (115200 baud)
 
 Type `help`. Main commands: `mode [gui|sensor]`, `step <deg> [rpm]` (prints requested vs. actual angle),
-`servo <deg>`, `dc <-255..255>`, `stop`, `status`, `tele on|off`, `tof swipe|follow`, `speed <rpm>` (stepper speed in SENSOR mode, default 60), `swipe left|right` (fake swipe for testing).
+`servo <deg>`, `dc <-255..255>`, `stop`, `status`, `tele on|off`, `tof swipe|follow`, `speed <rpm>` (stepper speed in SENSOR mode, default 180, max 300; moves ramp up from 60 rpm), `swipe left|right` (fake swipe for testing).
 
 Every 100 ms the firmware prints `name:value` telemetry (`ir_mv`, `dc_pwm`, `flex_raw_mv`, `flex_filt_mv`, `servo_deg`,
 `hand_x`, `step_deg`, …). The Arduino IDE **Serial Plotter** graphs it directly, including flex raw vs. filtered.
