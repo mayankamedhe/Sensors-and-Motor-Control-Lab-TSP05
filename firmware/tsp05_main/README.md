@@ -28,6 +28,8 @@ Event lines start with `#`. The ROS 2 bridge (`ros2_ws/src/tsp05_bridge`) parses
 
 ## Build and flash real hardware
 
+Step-by-step for Ubuntu and macOS, with troubleshooting: [docs/HOW_TO_RUN.md](../../docs/HOW_TO_RUN.md).
+
 ```bash
 cd firmware/tsp05_main
 pio run -e esp32dev -t upload
