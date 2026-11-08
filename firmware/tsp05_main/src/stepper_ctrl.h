@@ -7,8 +7,13 @@ namespace stepper {
 
 constexpr long STEPS_PER_REV = 200L * MICROSTEP;
 constexpr float DEG_PER_STEP = 360.0f / STEPS_PER_REV;
-constexpr float DEFAULT_RPM = 30.0f;
-constexpr float MAX_RPM = 120.0f;  // no acceleration ramp, so keep speeds moderate
+constexpr float DEFAULT_RPM = 180.0f;
+constexpr float MAX_RPM = 300.0f;
+// Moves start and end at START_RPM and ramp up/down at ACCEL_RPM_PER_S (0 -> 180 rpm in ~20 ms).
+// Starting a stepper directly at high speed makes it stall and buzz; the ramp avoids that.
+// If it still stalls: lower ACCEL_RPM_PER_S or the speed, or raise the EasyDriver current a little.
+constexpr float START_RPM = 60.0f;
+constexpr float ACCEL_RPM_PER_S = 6000.0f;
 
 void begin();
 void update();
