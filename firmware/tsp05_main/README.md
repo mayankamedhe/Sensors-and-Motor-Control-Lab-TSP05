@@ -28,6 +28,8 @@ Event lines start with `#`. A future ROS 2 bridge can parse the same lines.
 
 ## Build and flash real hardware
 
+Step-by-step for Ubuntu and macOS, with troubleshooting: [docs/HOW_TO_RUN.md](../../docs/HOW_TO_RUN.md).
+
 ```bash
 cd firmware/tsp05_main
 pio run -e esp32dev -t upload

@@ -2,6 +2,8 @@ README:
 
 Goal: To use 3 sensors and 3 motors with ESP32
 
+**Run it:** [docs/HOW_TO_RUN.md](docs/HOW_TO_RUN.md): install, flash and test the integrated firmware on Ubuntu or macOS.
+
 ## Flex sensor and servo — BillyChern
 
 [Wiring, calibration, and standalone Uno R3 test](contributions/BillyChern/flex_servo/README.md)
