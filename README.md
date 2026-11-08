@@ -1,4 +1,8 @@
-README:
+# TSP05: Sensors & Motor Control Lab
+
+[![Demo of the integrated sensor and motor system (3x speed)](media/demo_3x.gif)](media/demo_3x.mp4)
+
+*Bench demo at 3× speed ([MP4](media/demo_3x.mp4)): one ESP32 runs all sensors and motors. Sensors drive the motors: IR distance → DC motor speed, flex bend → servo angle, VL53L5CX ToF hand swipe → stepper.*
 
 Goal: To use 3 sensors and 3 motors with ESP32
 
