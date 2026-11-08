@@ -21,7 +21,6 @@ namespace {
 constexpr float SWIPE_DEG = 45.0f;  // stepper move per swipe (CONTEXT.md open question 11)
 // Follow mode: hand at the far left of the ToF view -> -FOLLOW_SPAN_DEG/2, far right -> +FOLLOW_SPAN_DEG/2.
 constexpr float FOLLOW_SPAN_DEG = 180.0f;
-constexpr float FOLLOW_RPM = 60.0f;
 constexpr float FOLLOW_ALPHA = 0.3f;         // EMA on hand x per frame: smooths ToF jitter
 constexpr float FOLLOW_DEADBAND_DEG = 2.0f;  // ignore target changes smaller than this
 constexpr uint32_t DEBOUNCE_MS = 30;
@@ -30,6 +29,9 @@ constexpr uint32_t TELEMETRY_MS = 100;
 Mode mode = Mode::GUI;  // start in GUI mode so nothing moves on its own at power-up
 enum class TofControl { SWIPE, FOLLOW };
 TofControl tofControl = TofControl::SWIPE;
+// Stepper speed when the ToF drives it (swipe and follow). Change at runtime with `speed <rpm>`.
+// There is no acceleration ramp: if the motor buzzes or skips instead of turning, lower it.
+float sensorRpm = 60.0f;
 bool telemetryOn = true;
 String line;
 
@@ -66,6 +68,7 @@ void printHelp() {
   Serial.println(F("#   stop                stop stepper and DC motor"));
   Serial.println(F("#   status | help | tele on|off"));
   Serial.println(F("#   tof swipe|follow    ToF -> stepper style: +/-45 deg per swipe, or follow the hand"));
+  Serial.println(F("#   speed <rpm>         stepper speed in SENSOR mode (GUI: step <deg> <rpm>)"));
   Serial.println(F("#   swipe left|right    fake a ToF swipe (acts in SENSOR mode, swipe style)"));
   Serial.println(F("# Commands (GUI mode only):"));
   Serial.println(F("#   step <deg> [rpm]    relative stepper move, e.g. step 37 or step -90 20"));
@@ -108,6 +111,10 @@ void handleCommand(String cmd) {
   else if (cmd == "tele on") telemetryOn = true;
   else if (cmd == "tele off") telemetryOn = false;
   else if (cmd == "tof swipe") { tofControl = TofControl::SWIPE; stepper::stop(); Serial.println(F("# TOF CONTROL swipe")); }
+  else if (sscanf(c, "speed %f", &a) == 1) {
+    sensorRpm = constrain(a, 1.0f, stepper::MAX_RPM);
+    Serial.printf("# SPEED %.1f rpm (sensor-driven stepper)\n", sensorRpm);
+  }
   else if (cmd == "tof follow") { tofControl = TofControl::FOLLOW; stepper::stop(); Serial.println(F("# TOF CONTROL follow")); }
   else if (sscanf(c, "swipe %15s", word) == 1) tof::injectSwipe(strcmp(word, "right") == 0 ? 1 : -1);
   else if (sscanf(c, "step %f %f", &a, &b) == 2) {
@@ -163,7 +170,7 @@ void handleFollow() {
   xSmooth += FOLLOW_ALPHA * (t.handX - xSmooth);
   const float target = (xSmooth / (tof::COLUMNS - 1) - 0.5f) * FOLLOW_SPAN_DEG;
   if (fabsf(target - lastTarget) < FOLLOW_DEADBAND_DEG) return;
-  lastTarget = stepper::moveToDegrees(target, FOLLOW_RPM);
+  lastTarget = stepper::moveToDegrees(target, sensorRpm);
 }
 
 void handleSwipes() {
@@ -181,7 +188,7 @@ void handleSwipes() {
     Serial.println(F("# SWIPE ignored: stepper still moving"));
     return;
   }
-  const float actual = stepper::moveDegrees(dir * SWIPE_DEG);
+  const float actual = stepper::moveDegrees(dir * SWIPE_DEG, sensorRpm);
   Serial.printf("# SWIPE %s -> stepper %+.3f deg\n", dir > 0 ? "RIGHT" : "LEFT", actual);
 }
 
