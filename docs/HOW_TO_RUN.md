@@ -140,4 +140,4 @@ See [Simulate online (wokwi.com)](../firmware/tsp05_main/README.md#simulate-onli
 
 ## ROS 2 GUI
 
-On the `ros2` branch: [ros2_ws/src/tsp05_bridge](https://github.com/mayankamedhe/Sensors-and-Motor-Control-Lab-TSP05/tree/ros2/ros2_ws/src/tsp05_bridge). It needs ROS 2 Humble or Jazzy, which run on **Ubuntu**. On a Mac, use an Ubuntu machine or VM for the ROS 2 side; the ESP32 can still be flashed from the Mac.
+[ros2_ws/src/tsp05_gui](../ros2_ws/src/tsp05_gui/README.md): rqt control panel + serial bridge, started with one command. It needs ROS 2 Humble or Jazzy, which run on **Ubuntu**. On a Mac: flash the ESP32 from the Mac, then plug it into an Ubuntu machine (for example the lab desktop) for the GUI.

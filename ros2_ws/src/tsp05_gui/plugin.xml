@@ -1,0 +1,13 @@
+<library path="src">
+  <class name="Tsp05Panel" type="tsp05_gui.panel.Tsp05Panel" base_class_type="rqt_gui_py::Plugin">
+    <description>TSP05 lab: sensor/motor state and motor commands for the ESP32 system.</description>
+    <qtgui>
+      <group>
+        <label>TSP05</label>
+      </group>
+      <label>TSP05 Control Panel</label>
+      <icon type="theme">input-gaming</icon>
+      <statustip>Show sensor and motor state, switch GUI/SENSOR mode, and command the motors.</statustip>
+    </qtgui>
+  </class>
+</library>

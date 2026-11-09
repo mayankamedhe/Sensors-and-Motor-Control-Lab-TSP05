@@ -77,12 +77,9 @@ Defined in [`tsp05_bridge/protocol.py`](tsp05_bridge/protocol.py). The firmware 
 
 Tests (no ROS needed): `python3 -m pytest src/tsp05_bridge/test`
 
-## GUI (Foxglove): not built yet
+## GUI
 
-Plan: `foxglove:=true`, then in Foxglove *Open connection → Foxglove WebSocket → ws://localhost:8765*, and add:
-- **Plot**: `flex/raw_mv` + `flex/filtered_mv` (filter demo), `ir/voltage_mv`, `stepper/angle_deg`.
-- **Gauge** or **Indicator**: `servo/angle_deg`, `dc/pwm`, `mode`, `tof/hand_present`.
-- **Publish** panels (buttons): `cmd/mode`, `cmd/stepper_rel_deg`, `cmd/servo_deg`, `cmd/dc_pwm`, `cmd/stop`.
-- **Log / Raw Messages**: `log`.
+The control panel is the rqt plugin in [`tsp05_gui`](../tsp05_gui/README.md). One command starts the bridge and the panel:
+`ros2 launch tsp05_gui system.launch.py port:=/dev/ttyUSB0`.
 
-Export the layout (*Layout → Export*) to `ros2_ws/src/tsp05_bridge/foxglove/` so everyone uses the same one.
+Foxglove also works with these topics: `foxglove:=true` (needs `ros-<distro>-foxglove-bridge`), then connect to `ws://localhost:8765`.
