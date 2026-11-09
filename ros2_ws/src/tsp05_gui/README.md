@@ -19,6 +19,8 @@ Motor controls are greyed out in SENSOR mode, because the firmware ignores typed
 
 ## Run (Ubuntu with ROS 2 Humble or Jazzy)
 
+First time on this machine? Full install steps (ROS 2, build tools, serial permissions): [docs/HOW_TO_RUN.md, Part B](../../../docs/HOW_TO_RUN.md#part-b-ros-2-and-the-gui-ubuntu).
+
 ROS 2 doesn't run natively on macOS, so **plug the ESP32 into the Ubuntu machine** (for example the lab desktop) for this part. Close any serial monitor first.
 
 ```bash
