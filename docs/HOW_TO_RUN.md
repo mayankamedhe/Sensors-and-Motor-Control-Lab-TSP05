@@ -1,6 +1,9 @@
-# How to run the integrated firmware (Ubuntu and macOS)
+# How to run the TSP05 system (Ubuntu and macOS)
 
-This guide flashes `firmware/tsp05_main` (all sensors and motors, one program) onto the ESP32 and drives it from the serial monitor.
+- **Part A (Ubuntu or macOS):** flash `firmware/tsp05_main` (all sensors and motors, one program) onto the ESP32 and drive it from the serial monitor.
+- **[Part B (Ubuntu only)](#part-b-ros-2-and-the-gui-ubuntu):** install ROS 2, then run the serial bridge and the rqt control panel.
+
+# Part A: Firmware
 
 - **Ubuntu:** verified 2026-11-08 on Aaron's laptop.
 - **macOS:** same tool, different install command and port name. Not yet verified; please update this file if something differs.
@@ -37,13 +40,14 @@ Check: `pio --version` prints a version number.
 ## 2. Get the code (once)
 
 ```bash
-git clone -b integration https://github.com/mayankamedhe/Sensors-and-Motor-Control-Lab-TSP05.git
+git clone https://github.com/mayankamedhe/Sensors-and-Motor-Control-Lab-TSP05.git
 cd Sensors-and-Motor-Control-Lab-TSP05
+git switch main          # the repo's default branch is an old one, so switch explicitly
 ```
 
 Already cloned? Update instead:
 ```bash
-git switch integration
+git switch main
 git pull
 ```
 
@@ -138,6 +142,75 @@ In sensor mode: **IR distance → DC motor speed**, **flex bend → servo angle*
 
 See [Simulate online (wokwi.com)](../firmware/tsp05_main/README.md#simulate-online-wokwicom). It works the same on Ubuntu and macOS, in the browser.
 
-## ROS 2 GUI
+---
 
-[ros2_ws/src/tsp05_gui](../ros2_ws/src/tsp05_gui/README.md): rqt control panel + serial bridge, started with one command. It needs ROS 2 Humble or Jazzy, which run on **Ubuntu**. On a Mac: flash the ESP32 from the Mac, then plug it into an Ubuntu machine (for example the lab desktop) for the GUI.
+# Part B: ROS 2 and the GUI (Ubuntu)
+
+The laptop side: [`tsp05_bridge`](../ros2_ws/src/tsp05_bridge/README.md) talks to the ESP32 over USB, and [`tsp05_gui`](../ros2_ws/src/tsp05_gui/README.md) is the control panel.
+ROS 2 needs **Ubuntu**. On a Mac: flash the ESP32 from the Mac (Part A), then plug it into an Ubuntu machine, for example the lab desktop.
+
+Total time the first time: about 30 minutes, mostly the ROS 2 download (~2 GB). Do Part A steps 1–2 first (git, the `dialout` group, the code).
+
+> Until [PR #2](https://github.com/mayankamedhe/Sensors-and-Motor-Control-Lab-TSP05/pull/2) is merged, the ROS 2 code is only on its branch: run `git switch mayank/ros2-gui` instead of `git switch main`.
+
+## 7. Install ROS 2 (once)
+
+Pick the version that matches your Ubuntu (`lsb_release -rs`):
+
+| Ubuntu | ROS 2 | Use `<distro>` = |
+|---|---|---|
+| 24.04 | Jazzy | `jazzy` |
+| 22.04 | Humble | `humble` |
+
+Add the ROS 2 package source (from the [official install guide](https://docs.ros.org/en/jazzy/Installation/Ubuntu-Install-Debs.html)):
+```bash
+sudo apt install software-properties-common
+sudo add-apt-repository universe
+sudo apt update && sudo apt install curl -y
+export ROS_APT_SOURCE_VERSION=$(curl -s https://api.github.com/repos/ros-infrastructure/ros-apt-source/releases/latest | grep -F "tag_name" | awk -F'"' '{print $4}')
+curl -L -o /tmp/ros2-apt-source.deb "https://github.com/ros-infrastructure/ros-apt-source/releases/download/${ROS_APT_SOURCE_VERSION}/ros2-apt-source_${ROS_APT_SOURCE_VERSION}.$(. /etc/os-release && echo ${UBUNTU_CODENAME:-${VERSION_CODENAME}})_all.deb"
+sudo dpkg -i /tmp/ros2-apt-source.deb
+```
+
+Install ROS 2 (includes rqt), the build tool, and the serial library. Replace `<distro>`:
+```bash
+sudo apt update
+sudo apt install ros-<distro>-desktop ros-dev-tools python3-serial
+```
+
+Check: `source /opt/ros/<distro>/setup.bash && ros2 --help` prints the ROS 2 help.
+
+## 8. Build the workspace (once, and after every `git pull`)
+
+```bash
+cd ros2_ws                                  # from the repo root
+source /opt/ros/<distro>/setup.bash
+colcon build --symlink-install
+```
+
+It ends with `Summary: 2 packages finished`.
+
+## 9. Start the bridge and the GUI
+
+1. Flash the ESP32 (Part A) and plug it into this machine. **Close every serial monitor** (`pio device monitor`, Arduino IDE): only one program can use the port.
+2. In a new terminal:
+   ```bash
+   cd ros2_ws
+   source /opt/ros/<distro>/setup.bash
+   source install/setup.bash
+   ros2 launch tsp05_gui system.launch.py port:=/dev/ttyUSB0
+   ```
+3. The control panel opens. Wait for the green **● ESP32 data** and **ToF: READY**, then turn on the motor supplies.
+4. Use **GUI mode** to command the motors from the panel, **SENSOR mode** to let the sensors drive them.
+
+**No hardware?** Terminal 1: `ros2 run tsp05_bridge fake_esp32` (prints a `/dev/pts/N` path). Terminal 2: the launch command with `port:=/dev/pts/N`.
+
+| Problem | Fix |
+|---|---|
+| `Package 'tsp05_gui' not found` | Run step 8, and `source install/setup.bash` in this terminal |
+| Panel shows **● no data** | Wrong port (`ls /dev/ttyUSB*`), a serial monitor still has it open, or the ESP32 isn't flashed |
+| `Permission denied` / `cannot open /dev/ttyUSB0` | `dialout` group (Part A step 1), then log out and back in |
+| `No module named 'serial'` | `sudo apt install python3-serial` |
+| Panel window doesn't appear over SSH | Run it on the machine's own screen, or use `ssh -X` |
+
+**Tested:** Jazzy on Ubuntu 24.04 with `fake_esp32`. Not yet tested with the real ESP32, or on Humble.
