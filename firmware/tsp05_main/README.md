@@ -24,7 +24,7 @@ Type `help`. Main commands: `mode [gui|sensor]`, `step <deg> [rpm]` (prints requ
 
 Every 100 ms the firmware prints `name:value` telemetry (`ir_mv`, `dc_pwm`, `flex_raw_mv`, `flex_filt_mv`, `servo_deg`,
 `hand_x`, `step_deg`, …). The Arduino IDE **Serial Plotter** graphs it directly, including flex raw vs. filtered.
-Event lines start with `#`. A future ROS 2 bridge can parse the same lines.
+Event lines start with `#`. The ROS 2 bridge (`ros2_ws/src/tsp05_bridge`) parses these lines into topics.
 
 ## Build and flash real hardware
 
@@ -67,5 +67,5 @@ It uses `wokwi.toml` and `diagram.json` in this folder.
 - DC motor: open-loop PWM only. The lab needs **encoder + PID** for GUI position and velocity moves.
 - Sensors in physical units: IR is reported in mV, not cm; the flex sensor as % of range.
 - Flex calibration (`FLEX_STRAIGHT_MV`, `FLEX_BENT_MV`) is converted from Uno readings and must be **re-measured on the ESP32**.
-- ROS 2 bridge and GUI.
+- GUI: rqt panel in `ros2_ws/src/tsp05_gui`, tested with the fake ESP32 only.
 - The team has 3 sensors; a 5-person team needs **4**.
