@@ -105,9 +105,9 @@ class SerialBridge(Node):
         if self.ser is None:
             return
         try:
-            n = self.ser.in_waiting
-            if n:
-                self.rx += self.ser.read(n)
+            chunk = self.ser.read(max(self.ser.in_waiting, 4096))
+            if chunk:
+                self.rx += chunk
         except (serial.SerialException, OSError) as e:
             self.drop(e)
             return
