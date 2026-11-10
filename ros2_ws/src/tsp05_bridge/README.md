@@ -23,7 +23,8 @@ source install/setup.bash
 
 | Setup | Command |
 |---|---|
-| Real ESP32 | `ros2 launch tsp05_bridge bridge.launch.py port:=/dev/ttyUSB0` |
+| Real ESP32 (Physical Linux) | `ros2 launch tsp05_bridge bridge.launch.py port:=/dev/ttyUSB0` |
+| Real ESP32 (Host Mac + UTM VM) | `ros2 launch tsp05_bridge bridge.launch.py port:=socket://<mac-ip>:4000` (see docs/HOW_TO_RUN.md) |
 | No hardware | Terminal 1: `ros2 run tsp05_bridge fake_esp32` (prints a `/dev/pts/N` path). Terminal 2: `ros2 launch tsp05_bridge bridge.launch.py port:=/dev/pts/N` |
 | Wokwi simulator (VS Code extension) | Start the simulator, then `ros2 launch tsp05_bridge bridge.launch.py port:=rfc2217://localhost:4000` |
 | With the Foxglove GUI | add `foxglove:=true` (needs `sudo apt install ros-<distro>-foxglove-bridge`) |

@@ -146,12 +146,12 @@ See [Simulate online (wokwi.com)](../firmware/tsp05_main/README.md#simulate-onli
 
 # Part B: ROS 2 and the GUI (Ubuntu)
 
-The laptop side: [`tsp05_bridge`](../ros2_ws/src/tsp05_bridge/README.md) talks to the ESP32 over USB, and [`tsp05_gui`](../ros2_ws/src/tsp05_gui/README.md) is the control panel.
-ROS 2 needs **Ubuntu**. On a Mac: flash the ESP32 from the Mac (Part A), then plug it into an Ubuntu machine, for example the lab desktop.
+The laptop side: [`tsp05_bridge`](../ros2_ws/src/tsp05_bridge/README.md) talks to the ESP32 over USB (or network socket), and [`tsp05_gui`](../ros2_ws/src/tsp05_gui/README.md) is the control panel.
+ROS 2 needs **Ubuntu**. On a Mac:
+- **Option 1 (Physical Ubuntu):** flash the ESP32 from the Mac (Part A), then plug it into an Ubuntu machine (e.g. lab desktop).
+- **Option 2 (UTM VM on Mac):** keep the ESP32 plugged into the Mac, and forward serial over the virtual network to the VM (no USB passthrough needed!). See [Step 9b](#9b-mac--utm-vm-setup-network-serial-forwarding) below.
 
 Total time the first time: about 30 minutes, mostly the ROS 2 download (~2 GB). Do Part A steps 1–2 first (git, the `dialout` group, the code).
-
-> Until [PR #2](https://github.com/mayankamedhe/Sensors-and-Motor-Control-Lab-TSP05/pull/2) is merged, the ROS 2 code is only on its branch: run `git switch mayank/ros2-gui` instead of `git switch main`.
 
 ## 7. Install ROS 2 (once)
 
@@ -190,7 +190,7 @@ colcon build --symlink-install
 
 It ends with `Summary: 2 packages finished`.
 
-## 9. Start the bridge and the GUI
+## 9. Start the bridge and the GUI (Physical Ubuntu)
 
 1. Flash the ESP32 (Part A) and plug it into this machine. **Close every serial monitor** (`pio device monitor`, Arduino IDE): only one program can use the port.
 2. In a new terminal:
@@ -202,6 +202,41 @@ It ends with `Summary: 2 packages finished`.
    ```
 3. The control panel opens. Wait for the green **● ESP32 data** and **ToF: READY**, then turn on the motor supplies.
 4. Use **GUI mode** to command the motors from the panel, **SENSOR mode** to let the sensors drive them.
+
+---
+
+## 9b. Mac + UTM VM Setup (Network serial forwarding, no USB passthrough)
+
+If you are running Ubuntu inside a UTM VM on your Mac, USB passthrough can often be unstable or tricky to configure. You can leave the ESP32 plugged directly into your Mac and forward the serial port over TCP to the VM:
+
+### On your Mac (macOS Terminal):
+1. Find your ESP32's serial port:
+   ```bash
+   ls /dev/cu.*
+   # e.g., /dev/cu.usbserial-0001
+   ```
+2. Make sure any serial monitor is closed (`pio device monitor`, Arduino IDE).
+3. Start the TCP serial bridge (listens on port 4000):
+   * **Option A: Using `socat`** (`brew install socat`):
+     ```bash
+     socat -d -d TCP-LISTEN:4000,reuseaddr,fork GOPEN:/dev/cu.usbserial-0001,raw,echo=0,ispeed=115200,ospeed=115200
+     ```
+     *(Note: On macOS, `socat` requires `ispeed` and `ospeed` rather than `b115200`)*.
+
+### In the UTM Ubuntu VM:
+1. Find your Mac host IP address:
+   * **UTM default (Shared Network):** `192.168.64.1` (verify with `ip route | grep default`).
+   * **Tailscale / VPN:** use your Mac's Tailscale IP (e.g. `100.73.140.108`).
+2. Run the system launch pointing to the socket:
+   ```bash
+   cd ros2_ws
+   source /opt/ros/humble/setup.bash
+   source install/setup.bash
+   ros2 launch tsp05_gui system.launch.py port:=socket://<mac-ip>:4000
+   ```
+   *(Or launch them in separate terminals: `ros2 launch tsp05_bridge bridge.launch.py port:=socket://<mac-ip>:4000` in Terminal 1, and `ros2 run tsp05_gui tsp05_gui` in Terminal 2).*
+
+---
 
 **No hardware?** Terminal 1: `ros2 run tsp05_bridge fake_esp32` (prints a `/dev/pts/N` path). Terminal 2: the launch command with `port:=/dev/pts/N`.
 
