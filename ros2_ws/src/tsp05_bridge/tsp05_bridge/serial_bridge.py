@@ -13,11 +13,14 @@ import rclpy
 from rclpy.node import Node
 from std_msgs.msg import Bool, Empty, Float32, String
 
-from tsp05_bridge import protocol
+import math
+
+from tsp05_bridge import protocol, units
 
 # telemetry key -> (topic, message type, converter)
 FLOAT_TOPICS = {
     "ir_mv": "ir/voltage_mv",
+    "ir_filt_mv": "ir/filtered_mv",
     "flex_raw_mv": "flex/raw_mv",
     "flex_filt_mv": "flex/filtered_mv",
     "bend_pct": "flex/bend_pct",
@@ -25,12 +28,18 @@ FLOAT_TOPICS = {
     "hand_mm": "tof/hand_mm",
     "servo_deg": "servo/angle_deg",
     "dc_pwm": "dc/pwm",
+    "dc_deg": "dc/angle_deg",   # encoder position (needs encoder firmware)
+    "dc_rpm": "dc/rpm",         # encoder speed (needs encoder firmware)
     "step_deg": "stepper/angle_deg",
 }
 BOOL_TOPICS = {
     "hand": "tof/hand_present",
     "step_moving": "stepper/moving",
+    "ir_detect": "ir/detected",
 }
+# Physical-unit topics computed here from the raw telemetry (see units.py). NaN = out of range / no hand.
+DERIVED_TOPICS = ["ir/distance_cm", "flex/bend_deg", "tof/bearing_deg", "tof/lateral_mm",
+                  "stepper/last_requested_deg", "stepper/last_actual_deg"]
 
 
 class SerialBridge(Node):
@@ -40,9 +49,15 @@ class SerialBridge(Node):
         self.baud = int(self.declare_parameter("baud", 115200).value)
         self.ser: serial.SerialBase | None = None
         self.rx = b""
+        # Calibration (physical units). Override at launch, e.g. ir_k:=... after measuring.
+        self.ir_k = float(self.declare_parameter("ir_k", units.IR_K).value)
+        self.ir_d0 = float(self.declare_parameter("ir_d0", units.IR_D0).value)
+        self.ir_c = float(self.declare_parameter("ir_c", units.IR_C).value)
+        self.flex_full_deg = float(self.declare_parameter("flex_full_deg", units.FLEX_FULL_DEG).value)
 
         self.float_pubs = {k: self.create_publisher(Float32, t, 10) for k, t in FLOAT_TOPICS.items()}
         self.bool_pubs = {k: self.create_publisher(Bool, t, 10) for k, t in BOOL_TOPICS.items()}
+        self.derived_pubs = {t: self.create_publisher(Float32, t, 10) for t in DERIVED_TOPICS}
         self.mode_pub = self.create_publisher(String, "mode", 10)
         self.tof_state_pub = self.create_publisher(String, "tof/state", 10)
         self.tof_control_pub = self.create_publisher(String, "tof/control", 10)
@@ -55,6 +70,8 @@ class SerialBridge(Node):
         self.create_subscription(Float32, "cmd/stepper_rel_deg", lambda m: self.send(protocol.cmd_stepper_rel_deg, m.data), 10)
         self.create_subscription(Float32, "cmd/servo_deg", lambda m: self.send(protocol.cmd_servo_deg, m.data), 10)
         self.create_subscription(Float32, "cmd/dc_pwm", lambda m: self.send(protocol.cmd_dc_pwm, m.data), 10)
+        self.create_subscription(Float32, "cmd/dc_rel_deg", lambda m: self.send(protocol.cmd_dc_rel_deg, m.data), 10)
+        self.create_subscription(Float32, "cmd/dc_rpm", lambda m: self.send(protocol.cmd_dc_rpm, m.data), 10)
         self.create_subscription(Empty, "cmd/stop", lambda _m: self.send(protocol.cmd_stop), 10)
         self.create_subscription(String, "cmd/raw", lambda m: self.send(lambda s: s.strip(), m.data), 10)
 
@@ -127,6 +144,10 @@ class SerialBridge(Node):
             swipe = protocol.parse_swipe(event)
             if swipe:
                 self.swipe_pub.publish(String(data=swipe))
+            step = protocol.parse_step_result(event)
+            if step:
+                self.pub_derived("stepper/last_requested_deg", step[0])
+                self.pub_derived("stepper/last_actual_deg", step[1])
             return
         t = protocol.parse_telemetry(line)
         if t is None:
@@ -137,12 +158,27 @@ class SerialBridge(Node):
         for key, pub in self.bool_pubs.items():
             if key in t:
                 pub.publish(Bool(data=bool(t[key])))
+        self.publish_physical(t)
         if "sensor_mode" in t:
             self.mode_pub.publish(String(data="SENSOR" if t["sensor_mode"] else "GUI"))
         if "tof_follow" in t:
             self.tof_control_pub.publish(String(data="follow" if t["tof_follow"] else "swipe"))
         if "tof_state" in t:
             self.tof_state_pub.publish(String(data=protocol.TOF_STATES.get(int(t["tof_state"]), "UNKNOWN")))
+
+    def pub_derived(self, topic: str, value: float | None) -> None:
+        self.derived_pubs[topic].publish(Float32(data=math.nan if value is None else float(value)))
+
+    def publish_physical(self, t: dict[str, float]) -> None:
+        if "ir_filt_mv" in t or "ir_mv" in t:
+            mv = t.get("ir_filt_mv", t.get("ir_mv"))
+            self.pub_derived("ir/distance_cm", units.ir_cm(mv, self.ir_k, self.ir_d0, self.ir_c))
+        if "bend_pct" in t:
+            self.pub_derived("flex/bend_deg", units.flex_deg(t["bend_pct"], self.flex_full_deg))
+        if "hand_x" in t:
+            self.pub_derived("tof/bearing_deg", units.tof_bearing_deg(t["hand_x"]))
+            if "hand_mm" in t:
+                self.pub_derived("tof/lateral_mm", units.tof_lateral_mm(t["hand_x"], t["hand_mm"]))
 
 
 def main() -> None:

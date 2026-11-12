@@ -7,6 +7,7 @@ and is applied on the GUI thread.
 from __future__ import annotations
 
 import collections
+import math
 import time
 
 from python_qt_binding.QtCore import QPointF, Qt, QTimer, Signal
@@ -19,10 +20,14 @@ from std_msgs.msg import Bool, Empty, Float32, String
 
 NS = "/tsp05/"
 FLOAT_TOPICS = [
-    "ir/voltage_mv", "flex/raw_mv", "flex/filtered_mv", "flex/bend_pct", "tof/hand_x", "tof/hand_mm",
-    "servo/angle_deg", "dc/pwm", "stepper/angle_deg",
+    "ir/voltage_mv", "ir/filtered_mv", "ir/distance_cm",
+    "flex/raw_mv", "flex/filtered_mv", "flex/bend_pct", "flex/bend_deg",
+    "tof/hand_x", "tof/hand_mm", "tof/bearing_deg", "tof/lateral_mm",
+    "servo/angle_deg", "dc/pwm", "dc/angle_deg", "dc/rpm",
+    "stepper/angle_deg", "stepper/last_requested_deg", "stepper/last_actual_deg",
 ]
-BOOL_TOPICS = ["tof/hand_present", "stepper/moving", "connected"]
+BOOL_TOPICS = ["tof/hand_present", "stepper/moving", "connected", "ir/detected"]
+DC_MAX_RPM = 100  # SPG30 output-shaft no-load speed is ~130-170 rpm depending on gearbox/voltage
 STRING_TOPICS = ["mode", "tof/state", "tof/control", "tof/swipe", "log"]
 
 
@@ -99,6 +104,8 @@ class PanelWidget(QWidget):
         self.pub_step = node.create_publisher(Float32, NS + "cmd/stepper_rel_deg", 10)
         self.pub_servo = node.create_publisher(Float32, NS + "cmd/servo_deg", 10)
         self.pub_dc = node.create_publisher(Float32, NS + "cmd/dc_pwm", 10)
+        self.pub_dc_deg = node.create_publisher(Float32, NS + "cmd/dc_rel_deg", 10)
+        self.pub_dc_rpm = node.create_publisher(Float32, NS + "cmd/dc_rpm", 10)
         self.pub_stop = node.create_publisher(Empty, NS + "cmd/stop", 10)
         self.pub_raw = node.create_publisher(String, NS + "cmd/raw", 10)
 
@@ -143,15 +150,15 @@ class PanelWidget(QWidget):
         top.addWidget(b_stop)
 
         # Sensors
-        self.ir_bar, self.ir_val = self._bar(0, 3300), QLabel("– mV")
-        self.flex_bar, self.flex_val = self._bar(0, 100), QLabel("–")
+        self.ir_bar, self.ir_val = self._bar(20, 150), QLabel("– cm")
+        self.flex_bar, self.flex_val = self._bar(0, 100), QLabel("– °")
         self.hand_bar, self.hand_val = self._bar(0, 300), QLabel("–")
         self.tof_state = QLabel("ToF: –")
         sg = QGridLayout()
-        sg.addWidget(QLabel("<b>IR distance</b> (→ DC motor)"), 0, 0, 1, 2)
+        sg.addWidget(QLabel("<b>IR distance</b> (Sharp GP2Y0A02, 20–150 cm → DC motor)"), 0, 0, 1, 2)
         sg.addWidget(self.ir_bar, 1, 0)
         sg.addWidget(self.ir_val, 1, 1)
-        sg.addWidget(QLabel("<b>Flex bend</b> (→ servo)"), 2, 0, 1, 2)
+        sg.addWidget(QLabel("<b>Flex bend angle</b> (→ servo)"), 2, 0, 1, 2)
         sg.addWidget(self.flex_bar, 3, 0)
         sg.addWidget(self.flex_val, 3, 1)
         sg.addWidget(QLabel("<b>ToF hand position</b> (→ stepper)"), 4, 0, 1, 2)
@@ -159,7 +166,7 @@ class PanelWidget(QWidget):
         sg.addWidget(self.hand_val, 5, 1)
         sg.addWidget(self.tof_state, 6, 0, 1, 2)
         self.flex_plot = LivePlot("Flex: raw vs filtered", ["raw", "filtered"], unit="mV")
-        self.ir_plot = LivePlot("IR sensor output", ["IR"], unit="mV")
+        self.ir_plot = LivePlot("IR: raw vs filtered", ["raw", "filtered"], unit="mV")
         sv = QVBoxLayout()
         sv.addLayout(sg)
         sv.addWidget(self.flex_plot)
@@ -193,6 +200,8 @@ class PanelWidget(QWidget):
         stg.addWidget(QLabel("Actual angle:"), 0, 0)
         stg.addWidget(self.step_val, 0, 1)
         stg.addWidget(self.step_moving, 0, 2)
+        self.step_last = QLabel("Last move: –")
+        stg.addWidget(self.step_last, 4, 0, 1, 3)
         stg.addWidget(QLabel("Relative move:"), 1, 0)
         stg.addWidget(self.step_spin, 1, 1)
         stg.addWidget(b_move, 1, 2)
@@ -225,9 +234,26 @@ class PanelWidget(QWidget):
         self.servo_box = QGroupBox("Servo (drag and release, or click a limit)")
         self.servo_box.setLayout(svg)
 
-        # DC motor
+        # DC motor: closed loop (encoder + PID) position and velocity, plus raw PWM for testing
+        self.dc_pos = QLabel("– °")
+        self.dc_pos.setFont(big)
+        self.dc_speed = QLabel("– rpm")
+        self.dc_speed.setFont(big)
+        self.dc_deg_spin = QDoubleSpinBox()
+        self.dc_deg_spin.setRange(-3600, 3600)
+        self.dc_deg_spin.setDecimals(1)
+        self.dc_deg_spin.setValue(90)
+        self.dc_deg_spin.setSuffix(" °")
+        b_dc_move = QPushButton("Move")
+        b_dc_move.clicked.connect(lambda: self.pub_dc_deg.publish(Float32(data=float(self.dc_deg_spin.value()))))
+        self.dc_rpm_spin = QDoubleSpinBox()
+        self.dc_rpm_spin.setRange(-DC_MAX_RPM, DC_MAX_RPM)
+        self.dc_rpm_spin.setDecimals(0)
+        self.dc_rpm_spin.setValue(30)
+        self.dc_rpm_spin.setSuffix(" rpm")
+        b_dc_run = QPushButton("Run")
+        b_dc_run.clicked.connect(lambda: self.pub_dc_rpm.publish(Float32(data=float(self.dc_rpm_spin.value()))))
         self.dc_val = QLabel("–")
-        self.dc_val.setFont(big)
         self.dc_slider = QSlider(Qt.Horizontal)
         self.dc_slider.setRange(-255, 255)
         self.dc_target = QLabel("0")
@@ -236,12 +262,23 @@ class PanelWidget(QWidget):
         b_dc0 = QPushButton("Stop DC")
         b_dc0.clicked.connect(lambda: (self.dc_slider.setValue(0), self.pub_dc.publish(Float32(data=0.0))))
         dg = QGridLayout()
-        dg.addWidget(QLabel("PWM (− reverse, + forward):"), 0, 0)
-        dg.addWidget(self.dc_val, 0, 1)
-        dg.addWidget(self.dc_slider, 1, 0)
-        dg.addWidget(self.dc_target, 1, 1)
-        dg.addWidget(b_dc0, 2, 0)
-        self.dc_box = QGroupBox("DC motor (open-loop PWM)")
+        dg.addWidget(QLabel("Encoder position:"), 0, 0)
+        dg.addWidget(self.dc_pos, 0, 1)
+        dg.addWidget(QLabel("Speed:"), 0, 2)
+        dg.addWidget(self.dc_speed, 0, 3)
+        dg.addWidget(QLabel("Relative move (− = reverse):"), 1, 0)
+        dg.addWidget(self.dc_deg_spin, 1, 1, 1, 2)
+        dg.addWidget(b_dc_move, 1, 3)
+        dg.addWidget(QLabel("Velocity (− = reverse):"), 2, 0)
+        dg.addWidget(self.dc_rpm_spin, 2, 1, 1, 2)
+        dg.addWidget(b_dc_run, 2, 3)
+        dg.addWidget(QLabel("<i>Open-loop PWM test:</i>"), 3, 0)
+        dg.addWidget(self.dc_slider, 3, 1, 1, 2)
+        dg.addWidget(self.dc_target, 3, 3)
+        dg.addWidget(QLabel("Applied PWM:"), 4, 0)
+        dg.addWidget(self.dc_val, 4, 1)
+        dg.addWidget(b_dc0, 4, 3)
+        self.dc_box = QGroupBox("DC motor (encoder + PID: relative degrees or velocity)")
         self.dc_box.setLayout(dg)
 
         self.gui_hint = QLabel("")
@@ -298,22 +335,42 @@ class PanelWidget(QWidget):
     def _on_msg(self, topic: str, value) -> None:
         self.last_msg_time = time.monotonic()
         if topic == "ir/voltage_mv":
-            self.ir_bar.setValue(int(value))
-            self.ir_val.setText(f"{value:.0f} mV")
-            self.ir_plot.add("IR", value)
+            self._ir_mv = value
+            self.ir_plot.add("raw", value)
+        elif topic == "ir/filtered_mv":
+            self.ir_plot.add("filtered", value)
+        elif topic == "ir/detected":
+            self._ir_detected = bool(value)
+        elif topic == "ir/distance_cm":
+            mv = getattr(self, "_ir_mv", math.nan)
+            det = " · DETECTED" if getattr(self, "_ir_detected", False) else ""
+            if math.isnan(value):
+                self.ir_bar.setValue(150)
+                self.ir_val.setText(f"out of range ({mv:.0f} mV){det}")
+            else:
+                self.ir_bar.setValue(int(value))
+                self.ir_val.setText(f"{value:.1f} cm ({mv:.0f} mV){det}")
         elif topic == "flex/raw_mv":
             self.flex_plot.add("raw", value)
         elif topic == "flex/filtered_mv":
             self.flex_plot.add("filtered", value)
         elif topic == "flex/bend_pct":
             self.flex_bar.setValue(int(value))
-            self.flex_val.setText(f"{value:.0f} %")
+        elif topic == "flex/bend_deg":
+            self.flex_val.setText(f"{value:.1f} °")
         elif topic == "tof/hand_x":
             self.hand_bar.setValue(int(value * 100) if value >= 0 else 0)
             self._hand_x = value
         elif topic == "tof/hand_mm":
-            x = getattr(self, "_hand_x", -1)
-            self.hand_val.setText(f"x={x:.2f}, {value:.0f} mm" if x >= 0 else "no hand")
+            self._hand_mm = value
+        elif topic == "tof/bearing_deg":
+            self._bearing = value
+        elif topic == "tof/lateral_mm":
+            if math.isnan(value) or getattr(self, "_hand_x", -1) < 0:
+                self.hand_val.setText("no hand")
+            else:
+                self.hand_val.setText(f"{getattr(self, '_bearing', math.nan):+.1f}°, "
+                                      f"{getattr(self, '_hand_mm', math.nan):.0f} mm away, {value:+.0f} mm sideways")
         elif topic == "tof/state":
             self.tof_state.setText(f"ToF: {value}")
         elif topic == "tof/control":
@@ -323,12 +380,21 @@ class PanelWidget(QWidget):
             self.log.appendPlainText(f"[swipe] {value}")
         elif topic == "stepper/angle_deg":
             self.step_val.setText(f"{value:.3f} °")
+        elif topic == "stepper/last_requested_deg":
+            self._step_req = value
+        elif topic == "stepper/last_actual_deg":
+            self.step_last.setText(f"Last move: requested {getattr(self, '_step_req', math.nan):+.3f}° "
+                                   f"→ actual {value:+.3f}°")
         elif topic == "stepper/moving":
             self.step_moving.setText("moving…" if value else "")
         elif topic == "servo/angle_deg":
             self.servo_val.setText(f"{value:.0f} °")
         elif topic == "dc/pwm":
             self.dc_val.setText(f"{value:+.0f}")
+        elif topic == "dc/angle_deg":
+            self.dc_pos.setText(f"{value:.1f} °")
+        elif topic == "dc/rpm":
+            self.dc_speed.setText(f"{value:+.1f} rpm")
         elif topic == "mode":
             if value != self.mode:
                 self._set_mode(value)
@@ -346,5 +412,6 @@ class PanelWidget(QWidget):
         self.timer.stop()
         for s in self.subs:
             self.node.destroy_subscription(s)
-        for p in (self.pub_mode, self.pub_tof, self.pub_step, self.pub_servo, self.pub_dc, self.pub_stop, self.pub_raw):
+        for p in (self.pub_mode, self.pub_tof, self.pub_step, self.pub_servo, self.pub_dc, self.pub_dc_deg,
+                  self.pub_dc_rpm, self.pub_stop, self.pub_raw):
             self.node.destroy_publisher(p)
