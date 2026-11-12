@@ -84,7 +84,8 @@ class FakeEsp32:
         hand_x = 1.5 + 1.5 * math.sin(t * 2.0) if hand else -1.0
 
         if self.sensor_mode:
-            self.dc = round(max(0.0, min(255.0, (ir_mv - 490) / (2930 - 490) * 255)))
+            # Same as firmware ir_dc.cpp (no hysteresis): off until detected, then 90..255 as it nears.
+            self.dc = 0 if ir_mv < 900 else round(90 + max(0.0, min(1.0, (ir_mv - 750) / (2500 - 750))) * 165)
             self.servo = round(70 + bend / 100 * 80)
             if self.tof_follow and hand:
                 self.step_target = round(((hand_x / 3) - 0.5) * 180 / STEP_DEG) * STEP_DEG

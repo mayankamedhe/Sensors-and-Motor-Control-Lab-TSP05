@@ -4,7 +4,7 @@ All sensors and motors in one program, as the lab requires.
 
 | Sensor | Motor | Module | Based on |
 |---|---|---|---|
-| Sharp IR rangefinder | DC motor speed (L298) | `src/ir_dc.cpp` | Mayanka's `IR_distance.ino` |
+| Sharp IR rangefinder (GP2Y0A02) | DC motor: off until a hand is detected (~80 cm), then faster as it gets closer (full speed at ~20 cm) | `src/ir_dc.cpp` | Mayanka's `IR_distance.ino` |
 | Flex sensor | RC servo angle | `src/flex_servo.cpp` | BillyChern's `flex_servo.ino` |
 | VL53L5CX hand position | Stepper: ±45° per swipe (`tof swipe`, default) or follows the hand (`tof follow`) | `src/tof_swipe.cpp`, `src/stepper_ctrl.cpp` | Mayank's `tof_swipe`, Rai's stepper controller |
 | Pushbutton (debounced) | Toggles GUI ↔ SENSOR mode | `src/main.cpp` | |
@@ -14,7 +14,7 @@ Pins: [`docs/PINOUT.md`](../../docs/PINOUT.md) (matches the team wiring; the DC 
 ## Modes
 
 - **GUI mode** (default at power-up): motors only move on serial commands. Sensors are still read and reported.
-- **SENSOR mode**: IR → DC speed, flex → servo, swipe → stepper. Motion commands are refused.
+- **SENSOR mode**: IR → DC speed (off with nothing in view; tune `DETECT_ON_MV`, `NEAR_MV`, `MIN_RUN_PWM` in `src/ir_dc.cpp`), flex → servo, swipe → stepper. Motion commands are refused.
 - Switch modes with the **button** or the `mode` command. Switching stops the stepper and the DC motor.
 
 ## Serial interface (115200 baud)
