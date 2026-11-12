@@ -47,3 +47,11 @@ def test_commands():
         protocol.cmd_mode("fast")
     with pytest.raises(ValueError):
         protocol.cmd_tof_control("wave")
+
+
+def test_step_result_and_dc_commands():
+    assert protocol.parse_step_result("STEP requested 37.000 deg -> actual 37.125 deg") == (37.0, 37.125)
+    assert protocol.parse_step_result("STEP requested -90.000 deg -> actual -90.000 deg") == (-90.0, -90.0)
+    assert protocol.parse_step_result("SWIPE RIGHT -> stepper +45.000 deg") is None
+    assert protocol.cmd_dc_rel_deg(-45) == "dcdeg -45.0"
+    assert protocol.cmd_dc_rpm(30) == "dcrpm 30.0"

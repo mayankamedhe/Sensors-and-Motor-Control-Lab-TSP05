@@ -9,10 +9,10 @@ The lab GUI: a custom **rqt** panel (the guideline allows rqt). It shows the sta
 | Area | What it does |
 |---|---|
 | Top bar | Data indicator (green = ESP32 data arriving), current **mode**, **GUI mode** / **SENSOR mode** buttons, ToF → stepper style (swipe/follow), **STOP motors** |
-| Sensors | IR voltage, flex bend %, ToF hand position and distance, ToF state; live plots of **flex raw vs. filtered** (filter demo) and IR output |
-| Stepper | **Actual angle** (after rounding to whole steps), relative move by any number of degrees, ±45°/±90° buttons, sensor-mode speed |
+| Sensors | All in physical units: IR distance in cm (plus mV and detection), flex bend angle in °, ToF hand bearing in °, distance and sideways offset in mm, ToF state; live **raw vs. filtered** plots for the flex sensor and the IR sensor |
+| Stepper | **Actual angle** (after rounding to whole steps), relative move by any number of degrees, ±45°/±90° buttons, last move requested vs. actual, sensor-mode speed |
 | Servo | Slider 0–180° (sends on release), buttons for both limits and the middle |
-| DC motor | PWM slider −255…255 (sign = direction), Stop |
+| DC motor | Encoder position (°) and speed (rpm); **relative move in degrees** and **velocity in rpm**, either direction (encoder + PID, firmware pending); open-loop PWM slider for testing; Stop |
 | Firmware events | Mode changes, swipes, command replies |
 
 Motor controls are greyed out in SENSOR mode, because the firmware ignores typed motion commands while the sensors drive the motors.

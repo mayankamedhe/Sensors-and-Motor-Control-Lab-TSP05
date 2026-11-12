@@ -15,6 +15,7 @@ import re
 
 TOF_STATES = {0: "INIT", 1: "CALIBRATING", 2: "READY", 3: "ERROR"}
 SWIPE_RE = re.compile(r"^#\s*SWIPE\s+(LEFT|RIGHT)\b")
+STEP_RE = re.compile(r"^#\s*STEP requested\s+(-?[\d.]+)\s*deg\s*->\s*actual\s+(-?[\d.]+)\s*deg")
 
 
 def parse_telemetry(line: str) -> dict[str, float] | None:
@@ -48,6 +49,12 @@ def parse_swipe(event: str) -> str | None:
     return m.group(1) if m else None
 
 
+def parse_step_result(event: str) -> tuple[float, float] | None:
+    """(requested, actual) degrees from "STEP requested 37.000 deg -> actual 37.125 deg", else None."""
+    m = STEP_RE.match("# " + event)
+    return (float(m.group(1)), float(m.group(2))) if m else None
+
+
 # ---------------- Commands ----------------
 def cmd_mode(value: str) -> str:
     value = value.strip().lower()
@@ -75,6 +82,16 @@ def cmd_servo_deg(deg: float) -> str:
 
 def cmd_dc_pwm(pwm: float) -> str:
     return f"dc {round(max(-255.0, min(255.0, pwm)))}"
+
+
+def cmd_dc_rel_deg(deg: float) -> str:
+    """DC motor: move this many degrees from the current encoder position (closed loop, PID)."""
+    return f"dcdeg {deg:.1f}"
+
+
+def cmd_dc_rpm(rpm: float) -> str:
+    """DC motor: hold this output-shaft speed, sign = direction (closed loop, PID). 0 = stop."""
+    return f"dcrpm {rpm:.1f}"
 
 
 def cmd_stop() -> str:

@@ -27,6 +27,12 @@ class FakeEsp32:
         self.step_target = 0.0
         self.servo = 70
         self.dc = 0
+        self.dc_deg = 0.0      # encoder position
+        self.dc_rpm = 0.0      # measured speed
+        self.dc_target = None  # closed-loop position target (deg) or None
+        self.dc_vel = None     # closed-loop velocity target (rpm) or None
+        self.ir_filt = 1700.0
+        self.ir_on = False
         self.t0 = time.monotonic()
         self.last_swipe = self.t0
 
@@ -41,7 +47,7 @@ class FakeEsp32:
         parts = cmd.split()
         if not parts:
             return
-        gui_only = parts[0] in ("step", "servo", "dc", "move", "forward", "reverse")
+        gui_only = parts[0] in ("step", "servo", "dc", "dcdeg", "dcrpm", "move", "forward", "reverse")
         if gui_only and self.sensor_mode:
             self.say(fd, "# ignored: switch to GUI mode first (`mode gui` or press the button)")
             return
@@ -55,6 +61,7 @@ class FakeEsp32:
                 self.say(fd, f"# TOF CONTROL {parts[1]}")
             elif cmd == "stop":
                 self.step_target, self.dc = self.step_pos, 0
+                self.dc_target = self.dc_vel = None
                 self.say(fd, "# stopped")
             elif parts[0] == "step":
                 req = float(parts[1])
@@ -66,7 +73,14 @@ class FakeEsp32:
                 self.say(fd, f"# SERVO {self.servo} deg")
             elif parts[0] == "dc":
                 self.dc = max(-255, min(255, round(float(parts[1]))))
+                self.dc_target = self.dc_vel = None
                 self.say(fd, f"# DC pwm {self.dc}")
+            elif parts[0] == "dcdeg":
+                self.dc_target, self.dc_vel = self.dc_deg + float(parts[1]), None
+                self.say(fd, f"# DCDEG {float(parts[1]):+.1f} deg -> target {self.dc_target:.1f} deg")
+            elif parts[0] == "dcrpm":
+                self.dc_vel, self.dc_target = float(parts[1]), None
+                self.say(fd, f"# DCRPM {self.dc_vel:+.1f} rpm")
             elif cmd in ("status", "help"):
                 self.say(fd, f"# fake ESP32: mode={'SENSOR' if self.sensor_mode else 'GUI'}")
             else:
@@ -85,6 +99,7 @@ class FakeEsp32:
 
         if self.sensor_mode:
             # Same as firmware ir_dc.cpp (no hysteresis): off until detected, then 90..255 as it nears.
+            self.dc_target = self.dc_vel = None
             self.dc = 0 if ir_mv < 900 else round(90 + max(0.0, min(1.0, (ir_mv - 750) / (2500 - 750))) * 165)
             self.servo = round(70 + bend / 100 * 80)
             if self.tof_follow and hand:
@@ -95,13 +110,30 @@ class FakeEsp32:
                 self.step_target = self.step_pos + 45 * d
                 self.say(fd, f"# SWIPE {'RIGHT' if d > 0 else 'LEFT'} -> stepper {45 * d:+.3f} deg")
 
+        # IR filter + detection with hysteresis, like ir_dc.cpp
+        self.ir_filt += 0.4 * (ir_mv - self.ir_filt)
+        self.ir_on = self.ir_filt >= 900 or (self.ir_on and self.ir_filt >= 750)
+
+        # DC motor: fake closed loop on a simulated encoder
+        if self.dc_target is not None:
+            self.dc_rpm = max(-60.0, min(60.0, 1.0 * (self.dc_target - self.dc_deg)))
+            if abs(self.dc_target - self.dc_deg) < 0.5:
+                self.dc_rpm, self.dc_target, self.dc = 0.0, None, 0
+        elif self.dc_vel is not None:
+            self.dc_rpm += 0.3 * (self.dc_vel - self.dc_rpm)
+        else:
+            self.dc_rpm = self.dc / 255 * 120
+        self.dc_deg += self.dc_rpm * 6.0 * dt  # rpm -> deg/s
+        self.dc = round(self.dc_rpm / 120 * 255) if (self.dc_target is not None or self.dc_vel is not None) else self.dc
+
         err = self.step_target - self.step_pos
         move = max(-STEP_SPEED_DPS * dt, min(STEP_SPEED_DPS * dt, err))
         self.step_pos += move
         moving = abs(self.step_target - self.step_pos) > 1e-6
 
         self.say(fd, f"sensor_mode:{int(self.sensor_mode)} tof_follow:{int(self.tof_follow)} tof_state:2 "
-                     f"ir_mv:{ir_mv:.0f} dc_pwm:{self.dc} flex_raw_mv:{flex_raw:.0f} flex_filt_mv:{flex_filt:.0f} "
+                     f"ir_mv:{ir_mv:.0f} ir_filt_mv:{self.ir_filt:.0f} ir_detect:{int(self.ir_on)} dc_pwm:{self.dc} "
+                     f"dc_deg:{self.dc_deg:.1f} dc_rpm:{self.dc_rpm:.1f} flex_raw_mv:{flex_raw:.0f} flex_filt_mv:{flex_filt:.0f} "
                      f"bend_pct:{bend:.1f} servo_deg:{self.servo} hand:{int(hand)} hand_x:{hand_x:.2f} "
                      f"hand_mm:{150 if hand else 0} step_deg:{self.step_pos:.3f} step_moving:{int(moving)}")
 

@@ -48,16 +48,21 @@ ros2 topic pub --once /tsp05/cmd/mode std_msgs/msg/String "{data: sensor}"
 |---|---|---|
 | `mode` | String | `GUI` or `SENSOR` |
 | `connected` | Bool | serial port open (every 2 s) |
-| `ir/voltage_mv` | Float32 | Sharp IR output, mV |
+| `ir/voltage_mv`, `ir/filtered_mv` | Float32 | Sharp IR output, raw vs. EMA-filtered, mV |
+| `ir/distance_cm` | Float32 | IR distance in cm (`units.py` calibration), NaN outside 20–150 cm |
+| `ir/detected` | Bool | hand/obstacle detected (motor-on hysteresis in the firmware) |
 | `flex/raw_mv`, `flex/filtered_mv` | Float32 | flex divider, raw vs. EMA-filtered (for the raw-vs-filtered plot) |
-| `flex/bend_pct` | Float32 | bend, % of calibrated range |
+| `flex/bend_pct`, `flex/bend_deg` | Float32 | bend, % of calibrated range and degrees |
 | `tof/state` | String | `INIT`, `CALIBRATING`, `READY`, `ERROR` |
 | `tof/control` | String | `swipe` or `follow` |
 | `tof/hand_present`, `tof/hand_x`, `tof/hand_mm` | Bool, Float32, Float32 | hand detection; x in columns 0–3 |
+| `tof/bearing_deg`, `tof/lateral_mm` | Float32 | hand direction from the sensor axis and sideways offset (NaN = no hand) |
 | `tof/swipe` | String | `LEFT` / `RIGHT`, once per swipe |
 | `stepper/angle_deg`, `stepper/moving` | Float32, Bool | actual stepper angle since boot |
+| `stepper/last_requested_deg`, `stepper/last_actual_deg` | Float32 | last GUI move: requested vs. actual (rounded to whole steps) |
 | `servo/angle_deg` | Float32 | commanded servo angle |
 | `dc/pwm` | Float32 | DC motor PWM, −255…255 (sign = direction) |
+| `dc/angle_deg`, `dc/rpm` | Float32 | encoder position and speed (telemetry keys `dc_deg`, `dc_rpm`; **firmware not done yet**) |
 | `log` | String | firmware event lines (mode changes, swipes, command replies) |
 
 **Commands (subscribed).** Motion commands only act in GUI mode; the firmware replies on `log` if it ignores one.
@@ -67,10 +72,14 @@ ros2 topic pub --once /tsp05/cmd/mode std_msgs/msg/String "{data: sensor}"
 | `cmd/mode` | String | `gui`, `sensor`, `toggle` |
 | `cmd/stepper_rel_deg` | Float32 | `37.0` → moves 36.9° (nearest step), shown on `stepper/angle_deg` |
 | `cmd/servo_deg` | Float32 | `0` … `180` |
-| `cmd/dc_pwm` | Float32 | `-255` … `255` |
+| `cmd/dc_pwm` | Float32 | `-255` … `255` (open loop, for testing) |
+| `cmd/dc_rel_deg` | Float32 | `90` → serial `dcdeg 90.0`: PID move relative to the encoder position (**firmware not done yet**) |
+| `cmd/dc_rpm` | Float32 | `-30` → serial `dcrpm -30.0`: PID velocity, 0 = stop (**firmware not done yet**) |
 | `cmd/stop` | Empty | stop stepper and DC motor |
 | `cmd/tof_control` | String | `swipe` or `follow` |
 | `cmd/raw` | String | any firmware serial command, e.g. `status` |
+
+**Physical units.** The bridge converts raw telemetry into physical units in [`tsp05_bridge/units.py`](tsp05_bridge/units.py). The IR defaults are a fit to the GP2Y0A02 datasheet curve: replace them with the team's own fit from `tools/ir_transfer_function` (multiply its `k` and `c` from Uno counts by 5000/1023 to get mV). Set `FLEX_FULL_DEG` to the angle used when measuring `FLEX_BENT_MV`.
 
 ## Serial protocol
 
