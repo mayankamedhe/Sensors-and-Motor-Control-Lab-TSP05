@@ -38,7 +38,10 @@ pip install numpy matplotlib pyserial
    python3 ir_transfer.py capture --port /dev/cu.usbmodem1101 --out data/ir_run1.csv
    ```
 
-   Suggested distances for the GP2Y0A21YK: **3, 5, 7** (below minimum range, shows the fold-back), then **10, 12, 15, 20, 25, 30, 35, 40, 50, 60, 70, 80** cm. Space them closely at short range, where the curve is steep. For the GP2Y0A02YK, go out to 150 cm.
+   **Inches:** add `--units in` and type distances in inches. The plot and error table then use inches too.
+   Inch distances for the GP2Y0A21YK: **1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16, 20, 24, 28, 31**.
+
+   Suggested distances (cm) for the GP2Y0A21YK: **3, 5, 7** (below minimum range, shows the fold-back), then **10, 12, 15, 20, 25, 30, 35, 40, 50, 60, 70, 80** cm. Space them closely at short range, where the curve is steep. For the GP2Y0A02YK, go out to 150 cm.
 4. Keep your hand and body out of the beam while it samples (about 1 s per point with 200 samples).
 
 ## Plotting
