@@ -3,20 +3,20 @@
 
 Two subcommands:
 
-  capture  Reads raw ADC counts from the Uno (ir_calibrate.ino). You place a target
+  capture  Reads the ESP32 logger (esp32_ir_logger/). You place a target
            at a measured distance, type that distance, and the script averages N
            samples there. Results are appended to a CSV as you go.
 
-  plot     Reads the CSV, plots distance (x) vs raw ADC counts (y) with the
-           sample spread as error bars, fits V = k / (d + d0) + c, and reports the
+  plot     Reads the CSV, plots distance (x) vs sensor output voltage in mV (y) with
+           the sample spread as error bars, fits V = k / (d + d0) + c, and reports the
            distance error of the inverse fit (d = k / (V - c) - d0) at each point.
 
 Distances can be in cm (default) or inches (--units in on capture). The unit is
 stored in the CSV header and the plot uses it automatically.
 
 Examples:
-  python3 ir_transfer.py capture --port /dev/cu.usbmodem1101 --out data/ir_run1.csv
-  python3 ir_transfer.py capture --port /dev/cu.usbmodem1101 --units in --out data/ir_run1.csv
+  python3 ir_transfer.py capture --port /dev/cu.usbserial-0001 --out data/ir_run1.csv
+  python3 ir_transfer.py capture --port /dev/cu.usbserial-0001 --units in --out data/ir_run1.csv
   python3 ir_transfer.py plot data/ir_run1.csv --out ir_transfer_function.png
 """
 
@@ -28,27 +28,27 @@ import time
 
 import numpy as np
 
-ADC_MAX = 1023
-VREF = 5.0
-FIELDS = ["mean_counts", "std_counts", "min_counts", "max_counts",
-          "n", "mean_volts"]
+FIELDS = ["mean_mv", "std_mv", "min_mv", "max_mv", "mean_counts", "std_counts", "n"]
 
 
 # ---------------------------------------------------------------- capture
 
 def read_samples(ser, n, timeout_s=5.0):
-    """Collect n integer readings from lines of the form 'IR,<counts>'."""
+    """Collect n readings from lines of the form 'IR,<raw counts>,<millivolts>'.
+
+    Returns an (n, 2) array of [counts, mV]."""
     ser.reset_input_buffer()
     ser.readline()  # drop a possibly partial first line
     values = []
     deadline = time.time() + timeout_s
     while len(values) < n:
         if time.time() > deadline:
-            raise TimeoutError(f"only got {len(values)}/{n} samples; is ir_calibrate.ino running?")
-        line = ser.readline().decode(errors="ignore").strip()
-        if line.startswith("IR,"):
+            raise TimeoutError(f"only got {len(values)}/{n} samples; is esp32_ir_logger flashed "
+                               "and the serial monitor closed?")
+        parts = ser.readline().decode(errors="ignore").strip().split(",")
+        if len(parts) == 3 and parts[0] == "IR":
             try:
-                values.append(int(line[3:]))
+                values.append((int(parts[1]), int(parts[2])))
             except ValueError:
                 pass
     return np.array(values)
@@ -59,8 +59,15 @@ def capture(args):
 
     new_file = not os.path.exists(args.out) or os.path.getsize(args.out) == 0
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
-    with serial.Serial(args.port, args.baud, timeout=1) as ser, open(args.out, "a", newline="") as f:
-        time.sleep(2.0)  # the Uno resets when the port opens
+    ser = serial.Serial()
+    ser.port, ser.baudrate, ser.timeout = args.port, args.baud, 1
+    # Keep DTR/RTS released so the ESP32 dev board's auto-reset circuit doesn't hold it in
+    # reset or bootloader mode while the port is open.
+    ser.dtr = False
+    ser.rts = False
+    ser.open()
+    with ser, open(args.out, "a", newline="") as f:
+        time.sleep(1.0)
         u = args.units
         dist_field = f"distance_{u}"
         if not new_file:
@@ -83,19 +90,21 @@ def capture(args):
                 print("  not a number")
                 continue
             s = read_samples(ser, args.samples)
+            counts, mv = s[:, 0], s[:, 1]
             row = {
                 dist_field: d,
-                "mean_counts": round(float(s.mean()), 2),
-                "std_counts": round(float(s.std(ddof=1)), 2),
-                "min_counts": int(s.min()),
-                "max_counts": int(s.max()),
+                "mean_mv": round(float(mv.mean()), 1),
+                "std_mv": round(float(mv.std(ddof=1)), 1),
+                "min_mv": int(mv.min()),
+                "max_mv": int(mv.max()),
+                "mean_counts": round(float(counts.mean()), 1),
+                "std_counts": round(float(counts.std(ddof=1)), 1),
                 "n": len(s),
-                "mean_volts": round(float(s.mean()) * VREF / ADC_MAX, 4),
             }
             writer.writerow(row)
             f.flush()
-            print(f"  {d:6.1f} {u} -> {row['mean_counts']:7.1f} counts "
-                  f"({row['mean_volts']:.3f} V), std {row['std_counts']:.1f}, n={row['n']}")
+            print(f"  {d:6.1f} {u} -> {row['mean_mv']:7.1f} mV (std {row['std_mv']:.1f}), "
+                  f"{row['mean_counts']:.0f} counts, n={row['n']}")
 
 
 # ---------------------------------------------------------------- fit + plot
@@ -107,8 +116,8 @@ def load(path):
         sys.exit(f"{path} has no data rows")
     unit = "in" if "distance_in" in rows[0] else "cm"
     d = np.array([float(r[f"distance_{unit}"]) for r in rows])
-    c = np.array([float(r["mean_counts"]) for r in rows])
-    s = np.array([float(r["std_counts"]) for r in rows])
+    c = np.array([float(r["mean_mv"]) for r in rows])
+    s = np.array([float(r["std_mv"]) for r in rows])
     order = np.argsort(d)
     return d[order], c[order], s[order], unit
 
@@ -133,11 +142,11 @@ def plot(args):
         matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    d, counts, std, u = load(args.csv)
+    d, mv, std, u = load(args.csv)
 
     # Below a few cm (~3 in) the Sharp output peaks and falls again (non-monotonic), so the
     # model is fitted only from the peak outward. That peak is the sensor's minimum range.
-    peak = int(np.argmax(counts))
+    peak = int(np.argmax(mv))
     usable = np.arange(len(d)) >= peak
     if args.min_dist is not None:
         usable &= d >= args.min_dist
@@ -146,19 +155,20 @@ def plot(args):
     if usable.sum() < 4:
         sys.exit("need at least 4 points in the usable range to fit")
 
-    k, d0, c = fit_inverse(d[usable], counts[usable])
-    predicted = k / (counts[usable] - c) - d0
+    k, d0, c = fit_inverse(d[usable], mv[usable])
+    predicted = k / (mv[usable] - c) - d0
     err = predicted - d[usable]
 
-    print(f"Fit: counts = {k:.1f} / (d + {d0:.2f}) + {c:.2f}    (d in {"inches" if u == "in" else "cm"})")
-    print(f"Inverse: d_{u} = {k:.1f} / (counts - {c:.2f}) - {d0:.2f}")
+    unit_name = "inches" if u == "in" else "cm"
+    print(f"Fit: mV = {k:.1f} / (d {d0:+.2f}) {c:+.2f}    (d in {unit_name})")
+    print(f"Inverse: d_{u} = {k:.1f} / (mV {-c:+.2f}) {-d0:+.2f}")
     print(f"Usable range used for fit: {d[usable].min():.1f}-{d[usable].max():.1f} {u}, "
           f"{usable.sum()} points")
     print(f"Distance error: mean |err| {np.mean(np.abs(err)):.2f} {u}, "
           f"RMS {np.sqrt(np.mean(err ** 2)):.2f} {u}, max |err| {np.max(np.abs(err)):.2f} {u}")
-    print(f"\n  true {u}   counts    volts   fit {u}   err {u}")
-    for di, ci, pi, ei in zip(d[usable], counts[usable], predicted, err):
-        print(f"  {di:7.1f}  {ci:7.1f}  {ci * VREF / ADC_MAX:7.3f}  {pi:7.1f}  {ei:+7.2f}")
+    print(f"\n  true {u}       mV   fit {u}   err {u}")
+    for di, ci, pi, ei in zip(d[usable], mv[usable], predicted, err):
+        print(f"  {di:7.1f}  {ci:7.1f}  {pi:7.1f}  {ei:+7.2f}")
 
     ink, ink2, grid = "#0b0b0b", "#52514e", "#e4e3df"
     meas_color, fit_color = "#2a78d6", "#eb6834"
@@ -170,16 +180,16 @@ def plot(args):
 
     xs = np.linspace(d[usable].min(), d.max(), 400)
     ax.plot(xs, k / (xs + d0) + c, color=fit_color, lw=2,
-            label=f"fit: counts = {k:.0f} / (d + {d0:.2f}) + {c:.0f}")
-    ax.errorbar(d, counts, yerr=std, fmt="o", ms=6, color=meas_color, ecolor=meas_color,
+            label=f"fit: mV = {k:.0f} / (d {d0:+.2f}) {c:+.0f}")
+    ax.errorbar(d, mv, yerr=std, fmt="o", ms=6, color=meas_color, ecolor=meas_color,
                 elinewidth=1, capsize=3, mec="white", mew=1.5,
                 label=f"measured (mean ± 1 std of {args.samples_label} samples)")
     if peak > 0:
         pad = 0.0125 * d.max()
         ax.axvspan(d.min() - pad, d[peak], color=grid, alpha=0.6, lw=0)
-        ax.text(d[peak] + pad, counts.max() * 0.04, "◂ shaded: below minimum range\n   (output not monotonic, not fitted)",
+        ax.text(d[peak] + pad, mv.max() * 0.04, "◂ shaded: below minimum range\n   (output not monotonic, not fitted)",
                 color=ink2, fontsize=8, ha="left", va="bottom")
-    ax.set_ylabel(f"Raw output (ADC counts, 0-{ADC_MAX} = 0-{VREF:.0f} V)")
+    ax.set_ylabel("Raw sensor output (mV at ESP32 ADC pin)")
     ax.set_title(args.title, color=ink, loc="left", fontsize=12)
     ax.set_ylim(bottom=0)
     ax.grid(True, color=grid, lw=0.8)
@@ -208,8 +218,8 @@ def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    c = sub.add_parser("capture", help="record distance vs raw counts from the Uno")
-    c.add_argument("--port", required=True, help="e.g. /dev/cu.usbmodem1101 or /dev/ttyACM0")
+    c = sub.add_parser("capture", help="record distance vs sensor output from the ESP32")
+    c.add_argument("--port", required=True, help="e.g. /dev/cu.usbserial-0001 (Mac) or /dev/ttyUSB0 (Linux)")
     c.add_argument("--baud", type=int, default=115200)
     c.add_argument("--units", choices=["cm", "in"], default="cm", help="unit you type distances in")
     c.add_argument("--samples", type=int, default=200, help="readings averaged per distance")
