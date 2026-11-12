@@ -1,6 +1,6 @@
 // TSP05 Sensors & Motor Control Lab: integrated firmware for one ESP32.
 //
-//   Sharp IR      -> DC motor speed  (ir_dc.cpp,       from Mayanka's IR_distance.ino)
+//   Sharp IR      -> DC motor: off until a hand is detected, faster as it gets closer (ir_dc.cpp)
 //   Flex sensor   -> RC servo angle  (flex_servo.cpp,  from BillyChern's flex_servo.ino)
 //   VL53L5CX      -> stepper, two styles (`tof swipe` / `tof follow`):
 //                    swipe:  each left/right swipe turns it +/-45 deg (tof_swipe.cpp, from Mayank's tof_swipe)
@@ -208,9 +208,9 @@ void printTelemetry() {
   if (!telemetryOn) return;
   // Telemetry contract (parsed by ros2_ws/src/tsp05_bridge/tsp05_bridge/protocol.py):
   // one line of space-separated `key:number` pairs. Add keys freely; don't rename existing ones.
-  Serial.printf("sensor_mode:%d tof_follow:%d tof_state:%d ir_mv:%d dc_pwm:%d flex_raw_mv:%d flex_filt_mv:%.0f "
+  Serial.printf("sensor_mode:%d tof_follow:%d tof_state:%d ir_mv:%d ir_filt_mv:%.0f ir_detect:%d dc_pwm:%d flex_raw_mv:%d flex_filt_mv:%.0f "
                 "bend_pct:%.1f servo_deg:%d hand:%d hand_x:%.2f hand_mm:%d step_deg:%.3f step_moving:%d\n",
-                mode == Mode::SENSOR, tofControl == TofControl::FOLLOW, (int)t.state, irdc::irMv(), irdc::pwm(),
+                mode == Mode::SENSOR, tofControl == TofControl::FOLLOW, (int)t.state, irdc::irMv(), irdc::irFiltMv(), irdc::irDetected(), irdc::pwm(),
                 flexservo::rawMv(), flexservo::filteredMv(), flexservo::bendPct(), flexservo::servoDeg(),
                 t.handPresent, t.handX, t.nearestMm, stepper::positionDeg(), stepper::isMoving());
 }
