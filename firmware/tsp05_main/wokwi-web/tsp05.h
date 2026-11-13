@@ -29,6 +29,11 @@ constexpr int FLEX = 32;  // flex sensor divider (power the divider from 3V3, no
 constexpr int DC_ENA = 15;  // PWM
 constexpr int DC_IN1 = 2;
 constexpr int DC_IN2 = 0;
+// SPG30E encoder (open-drain Hall outputs): 4.7-10k pull-ups to 3V3, never 5 V.
+// Wires: red M+, black M- (to the L298), brown Hall Vcc (5 V), green GND, blue A, purple B.
+// GPIO 16/17 are free on ESP32-WROOM DevKits (on WROVER modules they belong to PSRAM: use 4/5 instead).
+constexpr int ENC_A = 16;
+constexpr int ENC_B = 17;
 // Pushbutton to GND (internal pull-up), toggles GUI/SENSOR mode
 constexpr int BUTTON = 33;
 // Simulation only: slide pot that stands in for the hand in front of the ToF
@@ -38,6 +43,16 @@ constexpr int SIM_TOF_SLIDER = 35;
 // EasyDriver microstepping. Real board default is 1/8 (MS1 = MS2 = HIGH).
 #ifndef MICROSTEP
 #define MICROSTEP 8
+#endif
+
+// DC encoder counts per OUTPUT-shaft turn (x4 decoding). Starting guess for the SPG30E-30K;
+// measure it: `dcenc zero`, turn the output shaft 10 times by hand, `dcenc`, divide by 10.
+#ifndef ENC_COUNTS_PER_REV
+#define ENC_COUNTS_PER_REV 360
+#endif
+// +1 or -1. If `dc 100` makes dc_deg go DOWN, set this to -1 (or swap the blue and purple wires).
+#ifndef ENC_DIR
+#define ENC_DIR 1
 #endif
 
 enum class Mode { GUI, SENSOR };
@@ -146,6 +161,30 @@ bool irDetected();   // hand/obstacle in range (with hysteresis)
 int pwm();  // signed
 
 }  // namespace irdc
+
+// ===================== dc_pid.h =====================
+// SPG30E DC motor: quadrature Hall encoder + PID (position and velocity), GUI mode only.
+// The motor output itself still goes through irdc::setPwm() (L298, ir_dc.cpp).
+#include <Arduino.h>
+
+namespace dcpid {
+
+void begin();
+void update();                 // call every loop(): reads the encoder, runs the PID every 20 ms
+void moveRelative(float deg);  // closed-loop move, relative to the current position
+void setRpm(float rpm);        // closed-loop speed, sign = direction, 0 = stop
+void cancel();                 // back to open loop (does not touch the PWM)
+bool active();
+
+float angleDeg();  // output-shaft angle since boot (or since `dcenc zero`)
+float rpm();       // output-shaft speed, filtered
+long counts();     // raw encoder counts
+void zero();
+void setPosGains(float kp, float ki, float kd);
+void setVelGains(float kp, float ki);
+void printGains();
+
+}  // namespace dcpid
 
 // ===================== stepper_ctrl.cpp =====================
 
@@ -686,6 +725,167 @@ int pwm() { return pwmSigned; }
 
 }  // namespace irdc
 
+// ===================== dc_pid.cpp =====================
+
+namespace dcpid {
+namespace {
+
+// ---- Encoder ----
+// SPG30E: 3 pulses per motor-shaft turn per channel -> 12 counts per motor turn with x4 decoding,
+// times the gearbox ratio. ~360 counts per output turn is a starting guess for the 30K version.
+// MEASURE IT: `mode gui`, `dcenc zero`, turn the output shaft exactly 10 turns by hand, `dcenc`,
+// divide the count by 10 and put it here (config.h: ENC_COUNTS_PER_REV).
+constexpr float DEG_PER_COUNT = 360.0f / ENC_COUNTS_PER_REV;
+
+volatile int32_t encCount = 0;
+volatile uint8_t encPrev = 0;
+portMUX_TYPE encMux = portMUX_INITIALIZER_UNLOCKED;
+
+// Quadrature lookup: index = (previous AB << 2) | current AB -> -1, 0 or +1.
+const int8_t QDEC[16] = {0, -1, 1, 0, 1, 0, 0, -1, -1, 0, 0, 1, 0, 1, -1, 0};
+
+void IRAM_ATTR onEdge() {
+  const uint8_t cur = (digitalRead(pins::ENC_A) << 1) | digitalRead(pins::ENC_B);
+  portENTER_CRITICAL_ISR(&encMux);
+  encCount += ENC_DIR * QDEC[(encPrev << 2) | cur];
+  encPrev = cur;
+  portEXIT_CRITICAL_ISR(&encMux);
+}
+
+long readCount() {
+  portENTER_CRITICAL(&encMux);
+  const long c = encCount;
+  portEXIT_CRITICAL(&encMux);
+  return c;
+}
+
+// ---- Control ----
+constexpr uint32_t PERIOD_MS = 20;         // PID rate: 50 Hz
+constexpr float RPM_ALPHA = 0.3f;          // EMA on the measured speed (few counts per period)
+constexpr float POS_TOL_DEG = 2.0f;        // "arrived" when within this...
+constexpr float POS_TOL_RPM = 3.0f;        // ...and slower than this...
+constexpr int SETTLE_PERIODS = 5;          // ...for 5 periods in a row (100 ms)
+constexpr uint32_t MOVE_TIMEOUT_MS = 8000; // give up if a move never settles
+// Lowest PWM that turns the motor (same deadband as MIN_RUN_PWM in ir_dc.cpp). Added on top of
+// the PID output so small corrections still move the shaft.
+constexpr int MIN_PWM = 70;
+// Output-shaft rpm at PWM 255, for the velocity feedforward. Measure: `dc 255`, read dc_rpm.
+constexpr float RPM_AT_FULL_PWM = 130.0f;
+
+float posKp = 3.0f, posKi = 0.5f, posKd = 0.05f;  // PWM per deg, per deg*s, per deg/s
+float velKp = 1.5f, velKi = 4.0f;                 // PWM per rpm, per rpm*s
+
+enum class Ctl { OFF, POS, VEL };
+Ctl ctl = Ctl::OFF;
+float targetDeg = 0, targetRpm = 0, integ = 0;
+float rpmFilt = 0;
+long lastCount = 0;
+uint32_t lastMs = 0, moveStartMs = 0;
+int settled = 0;
+
+void drive(float u) {
+  // u: PID output in PWM units, sign = direction. Add the deadband offset so small u still turns.
+  int pwm = 0;
+  if (u > 0.5f) pwm = MIN_PWM + lroundf(u);
+  else if (u < -0.5f) pwm = -MIN_PWM + lroundf(u);
+  irdc::setPwm(constrain(pwm, -255, 255));
+}
+
+void finishMove(const char *why) {
+  ctl = Ctl::OFF;
+  irdc::setPwm(0);
+  Serial.printf("# DCDEG %s at %.1f deg (target %.1f, error %+.1f deg)\n", why, angleDeg(), targetDeg,
+                targetDeg - angleDeg());
+}
+
+}  // namespace
+
+void begin() {
+  pinMode(pins::ENC_A, INPUT_PULLUP);  // weak internal pull-ups; the external 4.7-10k to 3V3 do the real work
+  pinMode(pins::ENC_B, INPUT_PULLUP);
+  encPrev = (digitalRead(pins::ENC_A) << 1) | digitalRead(pins::ENC_B);
+  attachInterrupt(digitalPinToInterrupt(pins::ENC_A), onEdge, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(pins::ENC_B), onEdge, CHANGE);
+  lastCount = readCount();
+  lastMs = millis();
+}
+
+void update() {
+  const uint32_t now = millis();
+  if (now - lastMs < PERIOD_MS) return;
+  const float dt = (now - lastMs) / 1000.0f;
+  lastMs = now;
+
+  const long c = readCount();
+  const float instRpm = (c - lastCount) * DEG_PER_COUNT / 360.0f / dt * 60.0f;
+  lastCount = c;
+  rpmFilt += RPM_ALPHA * (instRpm - rpmFilt);
+
+  if (ctl == Ctl::POS) {
+    const float err = targetDeg - angleDeg();
+    if (fabsf(err) < POS_TOL_DEG && fabsf(rpmFilt) < POS_TOL_RPM) {
+      if (++settled >= SETTLE_PERIODS) return finishMove("reached");
+    } else {
+      settled = 0;
+    }
+    if (now - moveStartMs > MOVE_TIMEOUT_MS) return finishMove("TIMEOUT");
+    integ = constrain(integ + err * dt, -100.0f, 100.0f);
+    const float dDeg = -rpmFilt * 6.0f;  // derivative on measurement (deg/s), no kick on a new target
+    const float u = fabsf(err) < POS_TOL_DEG ? 0 : posKp * err + posKi * integ + posKd * dDeg;
+    drive(constrain(u, -255.0f + MIN_PWM, 255.0f - MIN_PWM));
+  } else if (ctl == Ctl::VEL) {
+    const float err = targetRpm - rpmFilt;
+    integ = constrain(integ + err * dt, -60.0f, 60.0f);
+    const float ff = targetRpm / RPM_AT_FULL_PWM * 255.0f;
+    irdc::setPwm(constrain(lroundf(ff + velKp * err + velKi * integ), -255L, 255L));
+  }
+}
+
+void moveRelative(float deg) {
+  targetDeg = angleDeg() + deg;
+  integ = 0;
+  settled = 0;
+  moveStartMs = millis();
+  ctl = Ctl::POS;
+  Serial.printf("# DCDEG %+.1f deg -> target %.1f deg\n", deg, targetDeg);
+}
+
+void setRpm(float r) {
+  if (fabsf(r) < 0.5f) {
+    cancel();
+    irdc::setPwm(0);
+    Serial.println(F("# DCRPM 0 (stopped)"));
+    return;
+  }
+  if (ctl != Ctl::VEL) integ = 0;
+  targetRpm = r;
+  ctl = Ctl::VEL;
+  Serial.printf("# DCRPM %+.1f rpm\n", targetRpm);
+}
+
+void cancel() { ctl = Ctl::OFF; }
+bool active() { return ctl != Ctl::OFF; }
+float angleDeg() { return readCount() * DEG_PER_COUNT; }
+float rpm() { return rpmFilt; }
+long counts() { return readCount(); }
+
+void zero() {
+  portENTER_CRITICAL(&encMux);
+  encCount = 0;
+  portEXIT_CRITICAL(&encMux);
+  lastCount = 0;
+}
+
+void setPosGains(float kp, float ki, float kd) { posKp = kp; posKi = ki; posKd = kd; printGains(); }
+void setVelGains(float kp, float ki) { velKp = kp; velKi = ki; printGains(); }
+
+void printGains() {
+  Serial.printf("# DC gains: pos kp=%.3f ki=%.3f kd=%.3f | vel kp=%.3f ki=%.3f | %d counts/rev\n", posKp, posKi,
+                posKd, velKp, velKi, ENC_COUNTS_PER_REV);
+}
+
+}  // namespace dcpid
+
 // ===================== main.cpp =====================
 // TSP05 Sensors & Motor Control Lab: integrated firmware for one ESP32.
 //
@@ -725,6 +925,7 @@ void setMode(Mode m) {
   mode = m;
   // Leaving either mode: stop the motors that run continuously so nothing keeps going unattended.
   stepper::stop();
+  dcpid::cancel();
   irdc::stop();
   while (tof::pollSwipe() != 0) {}  // drop swipes that happened before the switch
   Serial.printf("# MODE %s\n", modeName());
@@ -758,16 +959,20 @@ void printHelp() {
   Serial.println(F("#   step <deg> [rpm]    relative stepper move, e.g. step 37 or step -90 20"));
   Serial.println(F("#   move <steps> <rpm>  forward <rpm>  reverse <rpm>"));
   Serial.println(F("#   servo <deg>         0-180"));
-  Serial.println(F("#   dc <pwm>            -255..255, sign = direction"));
+  Serial.println(F("#   dc <pwm>            open loop, -255..255, sign = direction"));
+  Serial.println(F("#   dcdeg <deg>         DC closed-loop move relative to now, e.g. dcdeg 90 / dcdeg -45"));
+  Serial.println(F("#   dcrpm <rpm>         DC closed-loop speed, sign = direction, 0 = stop"));
+  Serial.println(F("#   dcenc [zero]        show encoder counts (or zero them): to measure counts/rev"));
+  Serial.println(F("#   dcgain pos <kp> <ki> <kd> | dcgain vel <kp> <ki>   tune the PID live"));
 }
 
 void printStatus() {
   const tof::Status t = tof::status();
-  Serial.printf("# mode=%s tof_control=%s | stepper pos=%.3f deg (%ld steps) %s rpm=%.1f | servo=%d deg | dc_pwm=%d | "
+  Serial.printf("# mode=%s tof_control=%s | stepper pos=%.3f deg (%ld steps) %s rpm=%.1f | servo=%d deg | dc_pwm=%d dc=%.1f deg %.1f rpm | "
                 "ir=%d mV | flex=%d mV (%.1f%%) | tof=%s frames=%lu\n",
                 modeName(), tofControl == TofControl::FOLLOW ? "follow" : "swipe", stepper::positionDeg(), stepper::positionSteps(),
                 stepper::isMoving() ? "MOVING" : "IDLE", stepper::currentRpm(), flexservo::servoDeg(),
-                irdc::pwm(), irdc::irMv(), flexservo::rawMv(), flexservo::bendPct(), tof::stateName(t.state),
+                irdc::pwm(), dcpid::angleDeg(), dcpid::rpm(), irdc::irMv(), flexservo::rawMv(), flexservo::bendPct(), tof::stateName(t.state),
                 (unsigned long)t.frames);
 }
 
@@ -782,13 +987,16 @@ void handleCommand(String cmd) {
   cmd.toLowerCase();
   if (cmd.length() == 0) return;
   const char *c = cmd.c_str();
-  float a, b;
+  float a, b, g;
   long n;
   char word[16];
 
   if (cmd == "help") printHelp();
   else if (cmd == "status") printStatus();
-  else if (cmd == "stop") { stepper::stop(); irdc::stop(); Serial.println(F("# stopped")); }
+  else if (cmd == "stop") { stepper::stop(); dcpid::cancel(); irdc::stop(); Serial.println(F("# stopped")); }
+  else if (cmd == "dcenc") Serial.printf("# DCENC %ld counts = %.1f deg (%d counts/rev)\n", dcpid::counts(), dcpid::angleDeg(), ENC_COUNTS_PER_REV);
+  else if (cmd == "dcenc zero") { dcpid::zero(); Serial.println(F("# DCENC zeroed")); }
+  else if (cmd == "dcgain") dcpid::printGains();
   else if (cmd == "mode") setMode(mode == Mode::GUI ? Mode::SENSOR : Mode::GUI);
   else if (cmd == "mode gui") setMode(Mode::GUI);
   else if (cmd == "mode sensor") setMode(Mode::SENSOR);
@@ -813,8 +1021,16 @@ void handleCommand(String cmd) {
     if (guiOnly()) stepper::runContinuous(false, b);
   } else if (sscanf(c, "servo %f", &a) == 1) {
     if (guiOnly()) Serial.printf("# SERVO %d deg\n", flexservo::setServoDeg(lroundf(a)));
+  } else if (sscanf(c, "dcdeg %f", &a) == 1) {
+    if (guiOnly()) dcpid::moveRelative(a);
+  } else if (sscanf(c, "dcrpm %f", &a) == 1) {
+    if (guiOnly()) dcpid::setRpm(a);
+  } else if (sscanf(c, "dcgain pos %f %f %f", &a, &b, &g) == 3) {
+    dcpid::setPosGains(a, b, g);
+  } else if (sscanf(c, "dcgain vel %f %f", &a, &b) == 2) {
+    dcpid::setVelGains(a, b);
   } else if (sscanf(c, "dc %f", &a) == 1) {
-    if (guiOnly()) Serial.printf("# DC pwm %d\n", irdc::setPwm(lroundf(a)));
+    if (guiOnly()) { dcpid::cancel(); Serial.printf("# DC pwm %d\n", irdc::setPwm(lroundf(a))); }
   } else Serial.printf("# unknown command: %s (type help)\n", c);
 }
 
@@ -892,9 +1108,10 @@ void printTelemetry() {
   if (!telemetryOn) return;
   // Telemetry contract (parsed by ros2_ws/src/tsp05_bridge/tsp05_bridge/protocol.py):
   // one line of space-separated `key:number` pairs. Add keys freely; don't rename existing ones.
-  Serial.printf("sensor_mode:%d tof_follow:%d tof_state:%d ir_mv:%d ir_filt_mv:%.0f ir_detect:%d dc_pwm:%d flex_raw_mv:%d flex_filt_mv:%.0f "
+  Serial.printf("sensor_mode:%d tof_follow:%d tof_state:%d ir_mv:%d ir_filt_mv:%.0f ir_detect:%d dc_pwm:%d dc_deg:%.1f dc_rpm:%.1f flex_raw_mv:%d flex_filt_mv:%.0f "
                 "bend_pct:%.1f servo_deg:%d hand:%d hand_x:%.2f hand_mm:%d step_deg:%.3f step_moving:%d\n",
                 mode == Mode::SENSOR, tofControl == TofControl::FOLLOW, (int)t.state, irdc::irMv(), irdc::irFiltMv(), irdc::irDetected(), irdc::pwm(),
+                dcpid::angleDeg(), dcpid::rpm(),
                 flexservo::rawMv(), flexservo::filteredMv(), flexservo::bendPct(), flexservo::servoDeg(),
                 t.handPresent, t.handX, t.nearestMm, stepper::positionDeg(), stepper::isMoving());
 }
@@ -914,6 +1131,7 @@ void setup() {
   stepper::begin();
   flexservo::begin();  // attach the servo before the DC PWM so they get separate LEDC channels
   irdc::begin();
+  dcpid::begin();
   tof::begin();        // background task on core 0; sensor firmware upload takes a few seconds
 
   printHelp();
@@ -926,6 +1144,7 @@ void loop() {
   readSerial();
   const bool sensorMode = mode == Mode::SENSOR;
   irdc::update(sensorMode);
+  dcpid::update();
   flexservo::update(sensorMode);
   handleSwipes();
   printTelemetry();

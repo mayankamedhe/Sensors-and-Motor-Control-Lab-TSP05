@@ -23,8 +23,8 @@ OUT = ROOT / "wokwi-web"
 
 # Headers first (dependency order), then implementations, then main.
 ORDER = [
-    "config.h", "stepper_ctrl.h", "tof_swipe.h", "flex_servo.h", "ir_dc.h",
-    "stepper_ctrl.cpp", "tof_swipe.cpp", "flex_servo.cpp", "ir_dc.cpp", "main.cpp",
+    "config.h", "stepper_ctrl.h", "tof_swipe.h", "flex_servo.h", "ir_dc.h", "dc_pid.h",
+    "stepper_ctrl.cpp", "tof_swipe.cpp", "flex_servo.cpp", "ir_dc.cpp", "dc_pid.cpp", "main.cpp",
 ]
 
 # Keep in sync with [env:wokwi] build_flags in platformio.ini.

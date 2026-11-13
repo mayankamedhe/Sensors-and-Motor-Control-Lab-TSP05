@@ -19,7 +19,10 @@ Matches the team's current wiring (2026-11-07). Source of truth in code:
 | 33 | Mode pushbutton → GND | internal pull-up, debounced in software |
 | 35 | *Simulation only:* slide pot standing in for the ToF hand | unused on real hardware |
 
-Free for the DC motor encoder (A/B): GPIO 16 and 17 are suggested. Add pull-ups to **3.3 V**, never 5 V.
+| 16 | DC encoder channel A (SPG30E **blue**) | 4.7–10 kΩ pull-up to **3.3 V**, never 5 V |
+| 17 | DC encoder channel B (SPG30E **purple**) | 4.7–10 kΩ pull-up to **3.3 V**, never 5 V |
+
+SPG30E motor cable: **red** M+ and **black** M− to the L298 outputs, **brown** Hall Vcc to 5 V, **green** GND (common with the ESP32), **blue** A → GPIO 16, **purple** B → GPIO 17. The encoder outputs are open-drain, so the pull-ups set the logic level: pulling them to 3.3 V keeps the ESP32 pins safe while the sensor runs on 5 V. GPIO 16/17 are free on ESP32-WROOM DevKits; on WROVER modules they are used by PSRAM, so use GPIO 4/5 and change `config.h`.
 
 ## ⚠️ DC motor on strapping pins 0, 2, 15
 
