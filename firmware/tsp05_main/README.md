@@ -20,7 +20,7 @@ Pins: [`docs/PINOUT.md`](../../docs/PINOUT.md) (matches the team wiring; the DC 
 ## Serial interface (115200 baud)
 
 Type `help`. Main commands: `mode [gui|sensor]`, `step <deg> [rpm]` (prints requested vs. actual angle),
-`servo <deg>`, `dc <-255..255>`, `stop`, `status`, `tele on|off`, `tof swipe|follow`, `speed <rpm>` (stepper speed in SENSOR mode, default 180, max 300; moves ramp up from 60 rpm), `swipe left|right` (fake swipe for testing).
+`servo <deg>`, `dc <-255..255>` (open loop), `dcdeg <deg>` / `dcrpm <rpm>` (closed loop), `dcenc [zero]`, `dcgain ...`, `stop`, `status`, `tele on|off`, `tof swipe|follow`, `speed <rpm>` (stepper speed in SENSOR mode, default 180, max 300; moves ramp up from 60 rpm), `swipe left|right` (fake swipe for testing).
 
 Every 100 ms the firmware prints `name:value` telemetry (`ir_mv`, `dc_pwm`, `flex_raw_mv`, `flex_filt_mv`, `servo_deg`,
 `hand_x`, `step_deg`, …). The Arduino IDE **Serial Plotter** graphs it directly, including flex raw vs. filtered.
@@ -62,9 +62,19 @@ Steps:
 **VS Code alternative:** install the *Wokwi Simulator* extension, run `pio run -e wokwi`, then *Wokwi: Start Simulator*.
 It uses `wokwi.toml` and `diagram.json` in this folder.
 
+## DC motor: encoder + PID (`src/dc_pid.cpp`)
+
+GUI mode only. `dcdeg <deg>` moves the output shaft by that many degrees from where it is (PID on position, reports `# DCDEG reached at ... (error ...)`); `dcrpm <rpm>` holds a speed in either direction (feedforward + PI), `dcrpm 0` stops. `dc <pwm>`, `stop` and a mode change cancel the closed loop. Telemetry: `dc_deg`, `dc_rpm`.
+
+Bring-up, in order (GUI mode, motor supply on):
+1. **Direction:** `dc 100`, then `dc 0`. `dc_deg` must have gone **up**. If it went down, set `ENC_DIR` to -1 in `config.h` (or swap blue/purple). If it is reversed, the PID would push the wrong way: the firmware detects that, stops the motor and prints `DC STOPPED: encoder direction looks reversed`.
+2. **Counts per turn:** `dcenc zero`, turn the output shaft exactly 10 turns by hand, `dcenc`, divide by 10, put it in `ENC_COUNTS_PER_REV`.
+3. **Feedforward:** `dc 255`, read `dc_rpm`, put it in `RPM_AT_FULL_PWM` in `dc_pid.cpp`. Set `MIN_PWM` to the lowest PWM that turns the shaft.
+4. **Tune live** (no re-flash): `dcgain pos <kp> <ki> <kd>` (default 3 0.5 0.25), `dcgain vel <kp> <ki>` (default 1.5 4). Overshoot → raise kd or lower kp; stops short → raise ki. Copy the final values into `dc_pid.cpp`.
+
 ## Known gaps (not done yet)
 
-- DC motor: open-loop PWM only. The lab needs **encoder + PID** for GUI position and velocity moves.
+- DC motor PID gains and `ENC_COUNTS_PER_REV` are simulation-tuned starting values: measure and tune on the real motor (see *DC motor: encoder + PID*).
 - Sensors in physical units: IR is reported in mV, not cm; the flex sensor as % of range.
 - Flex calibration (`FLEX_STRAIGHT_MV`, `FLEX_BENT_MV`) is converted from Uno readings and must be **re-measured on the ESP32**.
 - GUI: rqt panel in `ros2_ws/src/tsp05_gui`, tested with the fake ESP32 only.

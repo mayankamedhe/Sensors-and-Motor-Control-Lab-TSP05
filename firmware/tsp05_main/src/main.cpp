@@ -12,6 +12,7 @@
 // which the Arduino IDE Serial Plotter can graph. Event lines start with `#`.
 #include "config.h"
 #include "flex_servo.h"
+#include "dc_pid.h"
 #include "ir_dc.h"
 #include "stepper_ctrl.h"
 #include "tof_swipe.h"
@@ -41,6 +42,7 @@ void setMode(Mode m) {
   mode = m;
   // Leaving either mode: stop the motors that run continuously so nothing keeps going unattended.
   stepper::stop();
+  dcpid::cancel();
   irdc::stop();
   while (tof::pollSwipe() != 0) {}  // drop swipes that happened before the switch
   Serial.printf("# MODE %s\n", modeName());
@@ -74,16 +76,20 @@ void printHelp() {
   Serial.println(F("#   step <deg> [rpm]    relative stepper move, e.g. step 37 or step -90 20"));
   Serial.println(F("#   move <steps> <rpm>  forward <rpm>  reverse <rpm>"));
   Serial.println(F("#   servo <deg>         0-180"));
-  Serial.println(F("#   dc <pwm>            -255..255, sign = direction"));
+  Serial.println(F("#   dc <pwm>            open loop, -255..255, sign = direction"));
+  Serial.println(F("#   dcdeg <deg>         DC closed-loop move relative to now, e.g. dcdeg 90 / dcdeg -45"));
+  Serial.println(F("#   dcrpm <rpm>         DC closed-loop speed, sign = direction, 0 = stop"));
+  Serial.println(F("#   dcenc [zero]        show encoder counts (or zero them): to measure counts/rev"));
+  Serial.println(F("#   dcgain pos <kp> <ki> <kd> | dcgain vel <kp> <ki>   tune the PID live"));
 }
 
 void printStatus() {
   const tof::Status t = tof::status();
-  Serial.printf("# mode=%s tof_control=%s | stepper pos=%.3f deg (%ld steps) %s rpm=%.1f | servo=%d deg | dc_pwm=%d | "
+  Serial.printf("# mode=%s tof_control=%s | stepper pos=%.3f deg (%ld steps) %s rpm=%.1f | servo=%d deg | dc_pwm=%d dc=%.1f deg %.1f rpm | "
                 "ir=%d mV | flex=%d mV (%.1f%%) | tof=%s frames=%lu\n",
                 modeName(), tofControl == TofControl::FOLLOW ? "follow" : "swipe", stepper::positionDeg(), stepper::positionSteps(),
                 stepper::isMoving() ? "MOVING" : "IDLE", stepper::currentRpm(), flexservo::servoDeg(),
-                irdc::pwm(), irdc::irMv(), flexservo::rawMv(), flexservo::bendPct(), tof::stateName(t.state),
+                irdc::pwm(), dcpid::angleDeg(), dcpid::rpm(), irdc::irMv(), flexservo::rawMv(), flexservo::bendPct(), tof::stateName(t.state),
                 (unsigned long)t.frames);
 }
 
@@ -98,13 +104,16 @@ void handleCommand(String cmd) {
   cmd.toLowerCase();
   if (cmd.length() == 0) return;
   const char *c = cmd.c_str();
-  float a, b;
+  float a, b, g;
   long n;
   char word[16];
 
   if (cmd == "help") printHelp();
   else if (cmd == "status") printStatus();
-  else if (cmd == "stop") { stepper::stop(); irdc::stop(); Serial.println(F("# stopped")); }
+  else if (cmd == "stop") { stepper::stop(); dcpid::cancel(); irdc::stop(); Serial.println(F("# stopped")); }
+  else if (cmd == "dcenc") Serial.printf("# DCENC %ld counts = %.1f deg (%d counts/rev)\n", dcpid::counts(), dcpid::angleDeg(), ENC_COUNTS_PER_REV);
+  else if (cmd == "dcenc zero") { dcpid::zero(); Serial.println(F("# DCENC zeroed")); }
+  else if (cmd == "dcgain") dcpid::printGains();
   else if (cmd == "mode") setMode(mode == Mode::GUI ? Mode::SENSOR : Mode::GUI);
   else if (cmd == "mode gui") setMode(Mode::GUI);
   else if (cmd == "mode sensor") setMode(Mode::SENSOR);
@@ -129,8 +138,16 @@ void handleCommand(String cmd) {
     if (guiOnly()) stepper::runContinuous(false, b);
   } else if (sscanf(c, "servo %f", &a) == 1) {
     if (guiOnly()) Serial.printf("# SERVO %d deg\n", flexservo::setServoDeg(lroundf(a)));
+  } else if (sscanf(c, "dcdeg %f", &a) == 1) {
+    if (guiOnly()) dcpid::moveRelative(a);
+  } else if (sscanf(c, "dcrpm %f", &a) == 1) {
+    if (guiOnly()) dcpid::setRpm(a);
+  } else if (sscanf(c, "dcgain pos %f %f %f", &a, &b, &g) == 3) {
+    dcpid::setPosGains(a, b, g);
+  } else if (sscanf(c, "dcgain vel %f %f", &a, &b) == 2) {
+    dcpid::setVelGains(a, b);
   } else if (sscanf(c, "dc %f", &a) == 1) {
-    if (guiOnly()) Serial.printf("# DC pwm %d\n", irdc::setPwm(lroundf(a)));
+    if (guiOnly()) { dcpid::cancel(); Serial.printf("# DC pwm %d\n", irdc::setPwm(lroundf(a))); }
   } else Serial.printf("# unknown command: %s (type help)\n", c);
 }
 
@@ -208,9 +225,10 @@ void printTelemetry() {
   if (!telemetryOn) return;
   // Telemetry contract (parsed by ros2_ws/src/tsp05_bridge/tsp05_bridge/protocol.py):
   // one line of space-separated `key:number` pairs. Add keys freely; don't rename existing ones.
-  Serial.printf("sensor_mode:%d tof_follow:%d tof_state:%d ir_mv:%d ir_filt_mv:%.0f ir_detect:%d dc_pwm:%d flex_raw_mv:%d flex_filt_mv:%.0f "
+  Serial.printf("sensor_mode:%d tof_follow:%d tof_state:%d ir_mv:%d ir_filt_mv:%.0f ir_detect:%d dc_pwm:%d dc_deg:%.1f dc_rpm:%.1f flex_raw_mv:%d flex_filt_mv:%.0f "
                 "bend_pct:%.1f servo_deg:%d hand:%d hand_x:%.2f hand_mm:%d step_deg:%.3f step_moving:%d\n",
                 mode == Mode::SENSOR, tofControl == TofControl::FOLLOW, (int)t.state, irdc::irMv(), irdc::irFiltMv(), irdc::irDetected(), irdc::pwm(),
+                dcpid::angleDeg(), dcpid::rpm(),
                 flexservo::rawMv(), flexservo::filteredMv(), flexservo::bendPct(), flexservo::servoDeg(),
                 t.handPresent, t.handX, t.nearestMm, stepper::positionDeg(), stepper::isMoving());
 }
@@ -230,6 +248,7 @@ void setup() {
   stepper::begin();
   flexservo::begin();  // attach the servo before the DC PWM so they get separate LEDC channels
   irdc::begin();
+  dcpid::begin();
   tof::begin();        // background task on core 0; sensor firmware upload takes a few seconds
 
   printHelp();
@@ -242,6 +261,7 @@ void loop() {
   readSerial();
   const bool sensorMode = mode == Mode::SENSOR;
   irdc::update(sensorMode);
+  dcpid::update();
   flexservo::update(sensorMode);
   handleSwipes();
   printTelemetry();
