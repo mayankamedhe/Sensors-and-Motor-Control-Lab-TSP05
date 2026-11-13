@@ -27,7 +27,7 @@ FLOAT_TOPICS = [
     "stepper/angle_deg", "stepper/last_requested_deg", "stepper/last_actual_deg",
 ]
 BOOL_TOPICS = ["tof/hand_present", "stepper/moving", "connected", "ir/detected"]
-DC_MAX_RPM = 100  # SPG30 output-shaft no-load speed is ~130-170 rpm depending on gearbox/voltage
+DC_MAX_RPM = 60  # SPG30E-60K output shaft tops out around 60-70 rpm at full PWM
 STRING_TOPICS = ["mode", "tof/state", "tof/control", "tof/swipe", "log"]
 
 

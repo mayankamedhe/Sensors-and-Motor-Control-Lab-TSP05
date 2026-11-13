@@ -38,10 +38,10 @@ constexpr int SIM_TOF_SLIDER = 35;
 #define MICROSTEP 8
 #endif
 
-// DC encoder counts per OUTPUT-shaft turn (x4 decoding). Starting guess for the SPG30E-30K;
+// DC encoder counts per OUTPUT-shaft turn (x4 decoding): 12 per motor turn x 60:1 gearbox (SPG30E-60K);
 // measure it: `dcenc zero`, turn the output shaft 10 times by hand, `dcenc`, divide by 10.
 #ifndef ENC_COUNTS_PER_REV
-#define ENC_COUNTS_PER_REV 360
+#define ENC_COUNTS_PER_REV 720
 #endif
 // +1 or -1. If `dc 100` makes dc_deg go DOWN, set this to -1 (or swap the blue and purple wires).
 #ifndef ENC_DIR
