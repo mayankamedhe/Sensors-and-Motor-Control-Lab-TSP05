@@ -83,7 +83,6 @@ flowchart LR
 ## Challenges
 
 - **IR fold-back at close range.** Below about 20 cm the Sharp output drops again, so one voltage can mean two distances. Fix: keep the hand ≥ 20 cm away, and fit the transfer function only from the voltage peak outward.
-- **Bad IR measurement points.** Some readings were stuck at 0 V; a powered Sharp never outputs below about 0.3 V, which points to a loose wire. Points alternated between low noise (std ~15 mV) and high noise (std ~130 mV), suggesting the target or wires moved during sampling. Fix: dropped the bad points, check the live stream before recording, and add a 10 µF capacitor across the sensor supply.
 - **DC motor deadband and chatter.** Low PWM values don't overcome friction, and the motor flickered at the edge of the IR range. Fix: jump straight to PWM 90 on detection, and use separate on/off thresholds (900 / 750 mV).
 - **DC driver on ESP32 strapping pins (0, 2, 15).** These pins float during reset and flashing, so the motor can spin and uploads can fail. Fix: motor power off while flashing; moving to GPIO 18/19/23 is the permanent fix.
 - **Porting from Uno to ESP32.** The ESP32 ADC is 3.3 V max and nonlinear. Fix: use factory-calibrated millivolts, convert Uno thresholds from counts to mV, and power the flex divider from 3V3.
