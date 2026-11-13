@@ -981,7 +981,7 @@ void printHelp() {
   Serial.println(F("#   dc <pwm>            open loop, -255..255, sign = direction"));
   Serial.println(F("#   dcdeg <deg>         DC closed-loop move relative to now, e.g. dcdeg 90 / dcdeg -45"));
   Serial.println(F("#   dcrpm <rpm>         DC closed-loop speed, sign = direction, 0 = stop"));
-  Serial.println(F("#   dcenc [zero]        show encoder counts (or zero them): to measure counts/rev"));
+  Serial.println(F("#   dcenc [zero|watch]  encoder counts / zero them / 5 s wiring check of the A and B pins"));
   Serial.println(F("#   dcgain pos <kp> <ki> <kd> | dcgain vel <kp> <ki>   tune the PID live"));
 }
 
@@ -1013,7 +1013,24 @@ void handleCommand(String cmd) {
   if (cmd == "help") printHelp();
   else if (cmd == "status") printStatus();
   else if (cmd == "stop") { stepper::stop(); dcpid::cancel(); irdc::stop(); Serial.println(F("# stopped")); }
-  else if (cmd == "dcenc") Serial.printf("# DCENC %ld counts = %.1f deg (%d counts/rev)\n", dcpid::counts(), dcpid::angleDeg(), ENC_COUNTS_PER_REV);
+  else if (cmd == "dcenc") Serial.printf("# DCENC %ld counts = %.1f deg (%d counts/rev) | pins now: A(GPIO%d)=%d B(GPIO%d)=%d\n",
+                                         dcpid::counts(), dcpid::angleDeg(), ENC_COUNTS_PER_REV, pins::ENC_A,
+                                         digitalRead(pins::ENC_A), pins::ENC_B, digitalRead(pins::ENC_B));
+  else if (cmd == "dcenc watch") {
+    // Encoder wiring check: prints A/B for 5 s whenever they change. Turn the shaft slowly by hand.
+    Serial.println(F("# DCENC watch: turn the output shaft slowly for 5 s"));
+    int lastA = -1, lastB = -1, changes = 0;
+    for (uint32_t t0 = millis(); millis() - t0 < 5000;) {
+      const int pa = digitalRead(pins::ENC_A), pb = digitalRead(pins::ENC_B);
+      if (pa != lastA || pb != lastB) {
+        if (changes < 40) Serial.printf("#   A=%d B=%d  count=%ld\n", pa, pb, dcpid::counts());
+        lastA = pa; lastB = pb; changes++;
+      }
+      delay(1);
+    }
+    Serial.printf("# DCENC watch done: %d pin changes, count=%ld%s\n", changes - 1, dcpid::counts(),
+                  changes <= 1 ? " -> NO SIGNAL: check brown=5V, green=GND, 10k pull-ups to 3V3, blue->16, purple->17" : "");
+  }
   else if (cmd == "dcenc zero") { dcpid::zero(); Serial.println(F("# DCENC zeroed")); }
   else if (cmd == "dcgain") dcpid::printGains();
   else if (cmd == "mode") setMode(mode == Mode::GUI ? Mode::SENSOR : Mode::GUI);
