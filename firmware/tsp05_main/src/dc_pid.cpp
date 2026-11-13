@@ -45,7 +45,7 @@ constexpr uint32_t MOVE_TIMEOUT_MS = 8000; // give up if a move never settles
 // the PID output so small corrections still move the shaft.
 constexpr int MIN_PWM = 70;
 // Output-shaft rpm at PWM 255, for the velocity feedforward. Measure: `dc 255`, read dc_rpm.
-constexpr float RPM_AT_FULL_PWM = 130.0f;
+constexpr float RPM_AT_FULL_PWM = 65.0f;  // SPG30E-60K estimate: measure it
 
 float posKp = 3.0f, posKi = 0.5f, posKd = 0.25f;  // PWM per deg, per deg*s, per deg/s
 float velKp = 1.5f, velKi = 4.0f;                 // PWM per rpm, per rpm*s

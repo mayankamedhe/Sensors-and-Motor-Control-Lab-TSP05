@@ -45,10 +45,10 @@ constexpr int SIM_TOF_SLIDER = 35;
 #define MICROSTEP 8
 #endif
 
-// DC encoder counts per OUTPUT-shaft turn (x4 decoding). Starting guess for the SPG30E-30K;
+// DC encoder counts per OUTPUT-shaft turn (x4 decoding): 12 per motor turn x 60:1 gearbox (SPG30E-60K);
 // measure it: `dcenc zero`, turn the output shaft 10 times by hand, `dcenc`, divide by 10.
 #ifndef ENC_COUNTS_PER_REV
-#define ENC_COUNTS_PER_REV 360
+#define ENC_COUNTS_PER_REV 720
 #endif
 // +1 or -1. If `dc 100` makes dc_deg go DOWN, set this to -1 (or swap the blue and purple wires).
 #ifndef ENC_DIR
@@ -770,9 +770,9 @@ constexpr uint32_t MOVE_TIMEOUT_MS = 8000; // give up if a move never settles
 // the PID output so small corrections still move the shaft.
 constexpr int MIN_PWM = 70;
 // Output-shaft rpm at PWM 255, for the velocity feedforward. Measure: `dc 255`, read dc_rpm.
-constexpr float RPM_AT_FULL_PWM = 130.0f;
+constexpr float RPM_AT_FULL_PWM = 65.0f;  // SPG30E-60K estimate: measure it
 
-float posKp = 3.0f, posKi = 0.5f, posKd = 0.05f;  // PWM per deg, per deg*s, per deg/s
+float posKp = 3.0f, posKi = 0.5f, posKd = 0.25f;  // PWM per deg, per deg*s, per deg/s
 float velKp = 1.5f, velKi = 4.0f;                 // PWM per rpm, per rpm*s
 
 enum class Ctl { OFF, POS, VEL };
@@ -782,6 +782,17 @@ float rpmFilt = 0;
 long lastCount = 0;
 uint32_t lastMs = 0, moveStartMs = 0;
 int settled = 0;
+float startErr = 0;
+int wrongWay = 0;
+
+// Safety: if the encoder counts the opposite way to the motor (A/B swapped relative to M+/M-), the
+// PID pushes the wrong way and the motor runs away at full speed. Detect it and stop.
+void runaway() {
+  ctl = Ctl::OFF;
+  irdc::setPwm(0);
+  Serial.println(F("# DC STOPPED: encoder direction looks reversed. Set ENC_DIR to -1 in config.h "
+                   "(or swap the blue and purple encoder wires), re-flash, and try again."));
+}
 
 void drive(float u) {
   // u: PID output in PWM units, sign = direction. Add the deadband offset so small u still turns.
@@ -829,12 +840,18 @@ void update() {
       settled = 0;
     }
     if (now - moveStartMs > MOVE_TIMEOUT_MS) return finishMove("TIMEOUT");
-    integ = constrain(integ + err * dt, -100.0f, 100.0f);
+    if (fabsf(err) > fabsf(startErr) + 90.0f) return runaway();
+    // Integrate only near the target, so a long move doesn't wind up and overshoot.
+    if (fabsf(err) < 15.0f) integ = constrain(integ + err * dt, -100.0f, 100.0f);
+    else integ = 0;
     const float dDeg = -rpmFilt * 6.0f;  // derivative on measurement (deg/s), no kick on a new target
     const float u = fabsf(err) < POS_TOL_DEG ? 0 : posKp * err + posKi * integ + posKd * dDeg;
     drive(constrain(u, -255.0f + MIN_PWM, 255.0f - MIN_PWM));
   } else if (ctl == Ctl::VEL) {
     const float err = targetRpm - rpmFilt;
+    // Spinning hard the opposite way to the command for 0.3 s -> reversed encoder.
+    wrongWay = (rpmFilt * targetRpm < 0 && fabsf(rpmFilt) > 15.0f) ? wrongWay + 1 : 0;
+    if (wrongWay > 15) return runaway();
     integ = constrain(integ + err * dt, -60.0f, 60.0f);
     const float ff = targetRpm / RPM_AT_FULL_PWM * 255.0f;
     irdc::setPwm(constrain(lroundf(ff + velKp * err + velKi * integ), -255L, 255L));
@@ -843,6 +860,7 @@ void update() {
 
 void moveRelative(float deg) {
   targetDeg = angleDeg() + deg;
+  startErr = deg;
   integ = 0;
   settled = 0;
   moveStartMs = millis();
@@ -858,6 +876,7 @@ void setRpm(float r) {
     return;
   }
   if (ctl != Ctl::VEL) integ = 0;
+  wrongWay = 0;
   targetRpm = r;
   ctl = Ctl::VEL;
   Serial.printf("# DCRPM %+.1f rpm\n", targetRpm);
